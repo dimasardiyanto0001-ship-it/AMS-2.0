@@ -1,0 +1,294 @@
+<!-- =============================================================
+     SettingJadwalKerja.html  (REVISI — pakai google.script.run,
+     konsisten dengan JavaScript.html, TANPA fetch/token manual)
+     ============================================================= -->
+
+<div id="sjkWrap">
+
+  <div class="setjadwal-subtabs">
+    <button class="setjadwal-subtab active" data-tab="pola" onclick="sjkSwitchTab('pola')">Kelola Pola</button>
+    <button class="setjadwal-subtab" data-tab="assign" onclick="sjkSwitchTab('assign')">Assign Pola ke Karyawan</button>
+    <button class="setjadwal-subtab" data-tab="generate" onclick="sjkSwitchTab('generate')">Generate Jadwal</button>
+  </div>
+
+  <div class="setjadwal-panel active" id="sjkPanelPola">
+    <p class="muted">Buat pola rotasi shift di sini, lalu assign ke karyawan di sub-tab berikutnya.</p>
+
+    <div class="header-actions" style="flex-wrap:wrap; row-gap:8px;">
+      <input type="text" id="sjkNamaPola" placeholder="Nama pola, mis. 6 Kerja 1 Libur" />
+      <input type="text" id="sjkUrutanKode" placeholder="Urutan kode: P,P,P,P,P,P,OFF" style="min-width:220px;" />
+      <input type="text" id="sjkDeskripsiPola" placeholder="Deskripsi (opsional)" />
+      <button class="btn btn-primary" onclick="sjkTambahPola()">+ Tambah Pola</button>
+    </div>
+    <p class="muted" style="margin-top:6px;">Kode valid: P, S, M, MD, WD, OFF — urutan diulang otomatis kalau lebih pendek dari jumlah hari periode.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Nama Pola</th><th>Urutan Kode</th><th>Deskripsi</th><th>Aksi</th></tr></thead>
+        <tbody id="sjkTabelPola"><tr><td colspan="4" class="muted">Memuat...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="setjadwal-panel" id="sjkPanelAssign">
+    <p class="muted">Assign satu pola + offset hari untuk tiap karyawan, supaya rotasi tiap karyawan tidak jatuh di hari OFF yang sama semua.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Nama</th><th>Jabatan</th><th>Pola</th><th>Offset Hari</th><th>Aksi</th></tr></thead>
+        <tbody id="sjkTabelAssign"><tr><td colspan="5" class="muted">Memuat...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="setjadwal-panel" id="sjkPanelGenerate">
+    <p class="muted">Generate isi sheet Jadwal periode aktif berdasarkan pola yang sudah di-assign.</p>
+
+    <div class="header-actions" style="margin-bottom:4px;">
+      <label style="display:flex; align-items:center; gap:6px; font-weight:normal;">
+        <input type="radio" name="sjkMode" value="kosongSaja" checked /> Isi yang kosong saja (aman)
+      </label>
+      <label style="display:flex; align-items:center; gap:6px; font-weight:normal;">
+        <input type="radio" name="sjkMode" value="timpaSemua" /> Timpa semua sel karyawan yang punya pola
+      </label>
+    </div>
+    <p class="muted" id="sjkGenerateWarning" style="display:none; color:#ef4444;">
+      ⚠️ Mode ini akan MENIMPA seluruh isi Jadwal karyawan yang sudah punya pola, termasuk yang sudah diisi manual.
+    </p>
+
+    <button class="btn btn-danger" id="sjkBtnGenerate" onclick="sjkGenerateJadwal()">Generate Jadwal Sekarang</button>
+
+    <div id="sjkHasilGenerate" style="margin-top:16px;"></div>
+  </div>
+
+</div>
+
+<style>
+  .setjadwal-subtabs { display: flex; gap: 6px; border-bottom: 2px solid #e2e8f0; margin-bottom: 16px; }
+  .setjadwal-subtab {
+    padding: 8px 14px; border: none; background: none; cursor: pointer;
+    font-weight: 600; color: #64748b; border-bottom: 3px solid transparent;
+  }
+  .setjadwal-subtab.active { color: #1e3a8a; border-bottom-color: #1e3a8a; }
+  .setjadwal-panel { display: none; }
+  .setjadwal-panel.active { display: block; }
+</style>
+
+<script>
+  /* ---------------------------------------------------------------
+   * CATATAN: fungsi-fungsi berikut dipanggil lewat google.script.run,
+   * sama seperti seluruh JavaScript.html. Pastikan SESSION (dari
+   * JavaScript.html) sudah ada saat fungsi2 ini dipanggil — makanya
+   * loadnya di-trigger dari selectTab_() saat tab dibuka, bukan
+   * langsung dieksekusi saat script ini di-parse.
+   *
+   * WAJIB: tambahkan handler berikut di Kode.gs (doPost dispatcher)
+   * kalau belum ada:
+   *   getPolaShiftList(token)
+   *   addPolaShift(namaPola, urutanKode, deskripsi, token)
+   *   deletePolaShift(namaPola, token)
+   *   assignPolaKaryawan(nama, polaAssigned, offsetHari, token)
+   *   generateJadwalDariPola(mode, token)
+   *
+   * Kalau frontend juga dijalankan via adapter Netlify, tambahkan
+   * juga ke GAS_PARAM_MAP_ di JavaScript.html:
+   *   getPolaShiftList: ['token'],
+   *   addPolaShift: ['namaPola', 'urutanKode', 'deskripsi', 'token'],
+   *   deletePolaShift: ['namaPola', 'token'],
+   *   assignPolaKaryawan: ['nama', 'polaAssigned', 'offsetHari', 'token'],
+   *   generateJadwalDariPola: ['mode', 'token'],
+   * ------------------------------------------------------------- */
+
+  function sjkSwitchTab(tabName) {
+    document.querySelectorAll('.setjadwal-subtab').forEach(b => b.classList.toggle('active', b.dataset.tab === tabName));
+    document.getElementById('sjkPanelPola').classList.toggle('active', tabName === 'pola');
+    document.getElementById('sjkPanelAssign').classList.toggle('active', tabName === 'assign');
+    document.getElementById('sjkPanelGenerate').classList.toggle('active', tabName === 'generate');
+    if (tabName === 'assign') sjkMuatTabelAssign();
+  }
+
+  function sjkMuatDaftarPola() {
+    if (!SESSION) return;
+    google.script.run
+      .withSuccessHandler(list => {
+        window.sjkDaftarPolaCache = list || [];
+        const tbody = document.getElementById('sjkTabelPola');
+        if (!tbody) return;
+        if (!list || !list.length) {
+          tbody.innerHTML = '<tr><td colspan="4" class="muted">Belum ada pola. Tambahkan di atas.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = list.map(p => `
+          <tr>
+            <td>${sjkEsc(p.namaPola)}</td>
+            <td><code>${sjkEsc(p.urutanKode)}</code></td>
+            <td>${sjkEsc(p.deskripsi || '-')}</td>
+            <td><button class="btn btn-danger" onclick="sjkHapusPola('${sjkEscAttr(p.namaPola)}')">Hapus</button></td>
+          </tr>
+        `).join('');
+      })
+      .withFailureHandler(err => {
+        const tbody = document.getElementById('sjkTabelPola');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="4" style="color:#ef4444;">Gagal memuat: ' + sjkEsc(err.message) + '</td></tr>';
+      })
+      .getPolaShiftList(SESSION.token);
+  }
+
+  function sjkTambahPola() {
+    const namaPola = document.getElementById('sjkNamaPola').value.trim();
+    const urutanKode = document.getElementById('sjkUrutanKode').value.trim();
+    const deskripsi = document.getElementById('sjkDeskripsiPola').value.trim();
+    if (!namaPola || !urutanKode) {
+      alert('Nama pola dan urutan kode wajib diisi.');
+      return;
+    }
+    google.script.run
+      .withSuccessHandler(() => {
+        document.getElementById('sjkNamaPola').value = '';
+        document.getElementById('sjkUrutanKode').value = '';
+        document.getElementById('sjkDeskripsiPola').value = '';
+        sjkMuatDaftarPola();
+      })
+      .withFailureHandler(err => alert('Gagal menambah pola: ' + err.message))
+      .addPolaShift(namaPola, urutanKode, deskripsi, SESSION.token);
+  }
+
+  function sjkHapusPola(namaPola) {
+    if (!confirm('Hapus pola "' + namaPola + '"? Karyawan yang masih assign ke pola ini perlu di-assign ulang.')) return;
+    google.script.run
+      .withSuccessHandler(() => sjkMuatDaftarPola())
+      .withFailureHandler(err => alert('Gagal menghapus pola: ' + err.message))
+      .deletePolaShift(namaPola, SESSION.token);
+  }
+
+  function sjkMuatTabelAssign() {
+    const tbody = document.getElementById('sjkTabelAssign');
+    tbody.innerHTML = '<tr><td colspan="5" class="muted">Memuat...</td></tr>';
+    if (!SESSION) return;
+
+    function renderAssignTable(daftarPola, daftarKaryawan) {
+      const opsiPola = ['<option value="">(tidak ada)</option>']
+        .concat(daftarPola.map(p => `<option value="${sjkEscAttr(p.namaPola)}">${sjkEsc(p.namaPola)}</option>`))
+        .join('');
+
+      tbody.innerHTML = daftarKaryawan.map((k, i) => `
+        <tr>
+          <td>${sjkEsc(k.nama)}</td>
+          <td>${sjkEsc(k.jabatan || '-')}</td>
+          <td><select id="sjkPola_${i}">${opsiPola}</select></td>
+          <td><input type="number" id="sjkOffset_${i}" value="0" min="0" style="width:70px;" /></td>
+          <td><button class="btn btn-primary" onclick="sjkSimpanAssign('${sjkEscAttr(k.nama)}', ${i})">Simpan</button></td>
+        </tr>
+      `).join('');
+
+      daftarKaryawan.forEach((k, i) => {
+        if (k.polaAssigned) {
+          const sel = document.getElementById('sjkPola_' + i);
+          if (sel) sel.value = k.polaAssigned;
+        }
+        if (k.offsetHari !== undefined) {
+          const inp = document.getElementById('sjkOffset_' + i);
+          if (inp) inp.value = k.offsetHari;
+        }
+      });
+    }
+
+    function withKaryawan(daftarPola) {
+      google.script.run
+        .withSuccessHandler(daftarKaryawan => renderAssignTable(daftarPola, daftarKaryawan || []))
+        .withFailureHandler(err => {
+          tbody.innerHTML = '<tr><td colspan="5" style="color:#ef4444;">Gagal memuat: ' + sjkEsc(err.message) + '</td></tr>';
+        })
+        .getDaftarKaryawan(SESSION.token);
+    }
+
+    if (window.sjkDaftarPolaCache) {
+      withKaryawan(window.sjkDaftarPolaCache);
+    } else {
+      google.script.run
+        .withSuccessHandler(list => {
+          window.sjkDaftarPolaCache = list || [];
+          withKaryawan(window.sjkDaftarPolaCache);
+        })
+        .withFailureHandler(err => {
+          tbody.innerHTML = '<tr><td colspan="5" style="color:#ef4444;">Gagal memuat: ' + sjkEsc(err.message) + '</td></tr>';
+        })
+        .getPolaShiftList(SESSION.token);
+    }
+  }
+
+  function sjkSimpanAssign(nama, rowIndex) {
+    const polaAssigned = document.getElementById('sjkPola_' + rowIndex).value;
+    const offsetHari = document.getElementById('sjkOffset_' + rowIndex).value;
+    const btn = event.target;
+    google.script.run
+      .withSuccessHandler(() => {
+        const orig = btn.textContent;
+        btn.textContent = 'Tersimpan ✓';
+        setTimeout(() => { btn.textContent = orig; }, 1500);
+      })
+      .withFailureHandler(err => alert('Gagal menyimpan: ' + err.message))
+      .assignPolaKaryawan(nama, polaAssigned, offsetHari, SESSION.token);
+  }
+
+  document.querySelectorAll('input[name="sjkMode"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      const warn = document.getElementById('sjkGenerateWarning');
+      if (warn) {
+        warn.style.display = (document.querySelector('input[name="sjkMode"]:checked').value === 'timpaSemua') ? 'block' : 'none';
+      }
+    });
+  });
+
+  function sjkGenerateJadwal() {
+    const mode = document.querySelector('input[name="sjkMode"]:checked').value;
+    const konfirmasi = (mode === 'timpaSemua')
+      ? confirm('Yakin TIMPA SEMUA sel Jadwal karyawan yang punya pola? Data manual yang sudah diisi akan hilang.')
+      : confirm('Generate Jadwal untuk sel yang masih kosong saja?');
+    if (!konfirmasi) return;
+
+    const btn = document.getElementById('sjkBtnGenerate');
+    btn.disabled = true;
+    btn.textContent = 'Memproses...';
+
+    google.script.run
+      .withSuccessHandler(result => {
+        btn.disabled = false;
+        btn.textContent = 'Generate Jadwal Sekarang';
+        const info = result.generateJadwalInfo || {};
+        let html = `
+          <p class="muted">
+            <strong>Selesai.</strong> ${info.karyawanDigenerate || 0} karyawan diproses,
+            ${info.selDiisi || 0} sel diisi, ${info.selDilewati || 0} sel dilewati (sudah terisi sebelumnya).
+          </p>
+        `;
+        if (info.karyawanTanpaPola && info.karyawanTanpaPola.length) {
+          html += `
+            <p class="muted" style="color:#ef4444;">
+              <strong>${info.karyawanTanpaPola.length} karyawan belum punya pola / pola tidak ditemukan:</strong><br/>
+              ${info.karyawanTanpaPola.map(sjkEsc).join(', ')}
+            </p>
+          `;
+        }
+        document.getElementById('sjkHasilGenerate').innerHTML = html;
+      })
+      .withFailureHandler(err => {
+        btn.disabled = false;
+        btn.textContent = 'Generate Jadwal Sekarang';
+        document.getElementById('sjkHasilGenerate').innerHTML =
+          '<p class="muted" style="color:#ef4444;">Gagal generate: ' + sjkEsc(err.message) + '</p>';
+      })
+      .generateJadwalDariPola(mode, SESSION.token);
+  }
+
+  function sjkEsc(str) {
+    if (str === null || str === undefined) return '';
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function sjkEscAttr(str) {
+    return sjkEsc(str).replace(/'/g, '&#39;');
+  }
+
+  /* TIDAK ADA pemanggilan otomatis di sini. Panggil sjkMuatDaftarPola()
+     dari selectTab_() di JavaScript.html saat tab 'settingjadwalkerja'
+     dibuka — lihat instruksi di chat. */
+</script>
