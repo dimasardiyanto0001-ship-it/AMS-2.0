@@ -1,30 +1,19 @@
 /*************************************************************
- * 19_PengajuanIzin.gs  (REBUILD)
- * -----------------------------------------------------------
- * Form pengajuan Izin/Sakit/Cuti dari karyawan (PUBLIK, tanpa
- * login admin) + approval oleh admin + auto-tandai Alfa harian
- * lewat trigger terjadwal.
+ * 19_PengajuanIzin.gs
+ * Form pengajuan Izin/Sakit/Cuti dari karyawan (PUBLIK, tanpa login)
+ * + persetujuan oleh admin + auto-tandai Alfa harian (trigger).
  *
- * Sheet "PengajuanIzin" (hidden), kolom:
- * ID | Nama | NIK | Jenis | TglMulai | TglAkhir | Alasan |
- * LampiranURL | Status | DiajukanPada | DiprosesOleh |
- * DiprosesPada | CatatanAdmin
- *
+ * Sheet "PengajuanIzin" (tersembunyi), kolom:
+ *   ID | Nama | NIK | Jenis | TglMulai | TglAkhir | Alasan |
+ *   LampiranURL | Status | DiajukanPada | DiprosesOleh |
+ *   DiprosesPada | CatatanAdmin
  * Status: 'Pending' | 'Approved' | 'Rejected'
  *
- * CATATAN KEAMANAN: submitPengajuanIzin() & getKaryawanForPublicForm()
- * SENGAJA tidak butuh token (dipanggil dari halaman publik terpisah,
- * form-izin.html di Netlify). Identitas diverifikasi dengan mencocokkan
- * Nama + NIK terhadap sheet DataKaryawan.
- *
- * CATATAN PERBAIKAN (rebuild ini):
- * Versi sebelumnya sempat macet di UI ("Memuat..." tidak pernah
- * selesai) karena getPengajuanList() memperbaiki baris ber-ID kosong
- * dengan menulis SATU-PER-SATU ke sheet di dalam loop
- * (sheet.getRange(row,1).setValue(id)) — kalau ada banyak baris
- * berID kosong, ini bisa sangat lambat. Sekarang perbaikan ID
- * dikumpulkan dulu lalu ditulis SEKALI lewat setValues (batch),
- * jadi jauh lebih cepat dan tidak lagi berpotensi macet.
+ * KEAMANAN: submitPengajuanIzin() dan getKaryawanForPublicForm()
+ * SENGAJA tanpa token (dipanggil dari form-izin.html di Netlify).
+ * Identitas = Nama + NIK yang dicocokkan dengan sheet DataKaryawan.
+ * Karena publik, semua teks bebas (Alasan) dijaga agar tidak bisa
+ * menjadi rumus Sheets, dan ukuran masukan dibatasi.
  *************************************************************/
 
 const PENGAJUAN_SHEET_NAME_ = 'PengajuanIzin';
@@ -32,12 +21,17 @@ const PENGAJUAN_HEADER_ = ['ID', 'Nama', 'NIK', 'Jenis', 'TglMulai', 'TglAkhir',
   'LampiranURL', 'Status', 'DiajukanPada', 'DiprosesOleh', 'DiprosesPada', 'CatatanAdmin'];
 const PENGAJUAN_JENIS_KODE_ = { 'Izin': 'I', 'Sakit': 'S', 'Cuti': 'C' };
 const PENGAJUAN_LAMPIRAN_FOLDER_NAME_ = 'AMS_Lampiran_Pengajuan';
+const PENGAJUAN_TZ_ = 'GMT+7';
+const PENGAJUAN_ALASAN_MAX_ = 1000;
+const PENGAJUAN_CATATAN_MAX_ = 500;
+const PENGAJUAN_RENTANG_MAX_HARI_ = 62;                 // batas yang sama dengan penerapan ke Realisasi
+const PENGAJUAN_LAMPIRAN_MAX_BYTES_ = 10 * 1024 * 1024; // 10 MB setelah didekode
 
 /* ============================ SETUP SHEET ============================ */
 
-/** Ambil (atau buat kalau belum ada) sheet PengajuanIzin di spreadsheet AKTIF script ini. */
+/** Ambil (atau buat bila belum ada) sheet PengajuanIzin di spreadsheet aktif. */
 function getOrCreatePengajuanSheet_() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSpreadsheet_();
   let sheet = ss.getSheetByName(PENGAJUAN_SHEET_NAME_);
   if (!sheet) {
     sheet = ss.insertSheet(PENGAJUAN_SHEET_NAME_);
@@ -51,9 +45,49 @@ function getOrCreatePengajuanSheet_() {
   return sheet;
 }
 
+/* ============================ HELPER ============================ */
+
+function generatePengajuanId_() {
+  return 'PGJ' + Date.now() + Math.floor(Math.random() * 1000);
+}
+
+/**
+ * Isi sel tanggal -> 'yyyy-MM-dd'. Sheets sering mengubah teks "2026-10-05" jadi
+ * tanggal asli saat disimpan; tanggal asli diformat di GMT+7 (bukan ISO/UTC,
+ * yang membuat tanggal mundur 1 hari), teks dipakai apa adanya.
+ */
+function pengajuanDateStr_(value) {
+  if (value instanceof Date) {
+    return isNaN(value.getTime()) ? '' : Utilities.formatDate(value, PENGAJUAN_TZ_, 'yyyy-MM-dd');
+  }
+  return String(value === null || value === undefined ? '' : value).trim();
+}
+
+/** 'yyyy-MM-dd' -> 'dd/MM/yyyy' untuk tampilan; teks lain dikembalikan apa adanya. */
+function formatTanggalPengajuan_(value) {
+  const s = pengajuanDateStr_(value);
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? m[3] + '/' + m[2] + '/' + m[1] : s;
+}
+
+/** 'yyyy-MM-dd' -> {y, m(1-12), d}, atau null bila bukan tanggal yang sah. */
+function parsePengajuanYmd_(str) {
+  const m = String(str || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  const y = parseInt(m[1], 10), mo = parseInt(m[2], 10), d = parseInt(m[3], 10);
+  const check = new Date(y, mo - 1, d);
+  if (check.getFullYear() !== y || check.getMonth() !== mo - 1 || check.getDate() !== d) return null;
+  return { y: y, m: mo, d: d };
+}
+
+/** Super Admin saja (kebijakan lama modul ini, tidak lewat matrix Hak Akses). */
+function requirePengajuanAdmin_(token, pesan) {
+  return requireSuperAdmin_(token, pesan);
+}
+
 /* ============================ PUBLIK (TANPA LOGIN) ============================ */
 
-/** Daftar nama karyawan aktif (dari sheet Jadwal periode aktif), buat dropdown di form publik. */
+/** Daftar nama karyawan di sheet Jadwal periode aktif (untuk pilihan nama di form publik). */
 function getKaryawanForPublicForm() {
   const jadwalSheet = getSheet_(CONFIG.SHEET_JADWAL);
   const lastRow = getLastEmployeeRow_(jadwalSheet);
@@ -66,10 +100,8 @@ function getKaryawanForPublicForm() {
 }
 
 /**
- * Terima pengajuan baru dari form publik. TIDAK butuh token — identitas
- * diverifikasi dengan mencocokkan nama+NIK terhadap sheet DataKaryawan.
- * Lampiran WAJIB (base64), disimpan ke folder Drive khusus dan link-nya
- * dicatat di sheet.
+ * Terima pengajuan baru dari form publik. Lampiran WAJIB (base64), disimpan ke
+ * folder Drive khusus dan tautannya dicatat di sheet.
  */
 function submitPengajuanIzin(nama, nik, jenis, tglMulai, tglAkhir, alasan, lampiranBase64, lampiranFilename, lampiranMimeType) {
   nama = String(nama || '').trim();
@@ -90,9 +122,19 @@ function submitPengajuanIzin(nama, nik, jenis, tglMulai, tglAkhir, alasan, lampi
   if (!alasan) throw new Error('Alasan wajib diisi.');
   if (!lampiranBase64) throw new Error('Lampiran wajib diupload (mis. surat dokter untuk Sakit, atau dokumen pendukung lainnya).');
 
-  // Verifikasi Nama + NIK cocok dengan data karyawan (getNikMap_ dari 12_Employee.gs)
-  const nikMap = getNikMap_(); // nama(lowercase) -> nik
-  const nikTerdaftar = nikMap[nama.toLowerCase()];
+  // Batas masukan (form publik).
+  if (alasan.length > PENGAJUAN_ALASAN_MAX_) throw new Error('Alasan terlalu panjang (maksimal ' + PENGAJUAN_ALASAN_MAX_ + ' karakter).');
+  const jumlahHari = Math.round((dAkhir.getTime() - dMulai.getTime()) / 86400000) + 1;
+  if (jumlahHari > PENGAJUAN_RENTANG_MAX_HARI_) {
+    throw new Error('Rentang pengajuan maksimal ' + PENGAJUAN_RENTANG_MAX_HARI_ + ' hari. Pisahkan menjadi beberapa pengajuan.');
+  }
+  const lampiranData = stripDataUrlPrefix_(lampiranBase64);
+  if (Math.floor(lampiranData.length * 3 / 4) > PENGAJUAN_LAMPIRAN_MAX_BYTES_) {
+    throw new Error('Ukuran lampiran maksimal ' + (PENGAJUAN_LAMPIRAN_MAX_BYTES_ / 1024 / 1024) + ' MB.');
+  }
+
+  // Verifikasi Nama + NIK terhadap DataKaryawan.
+  const nikTerdaftar = getNikMap_()[nama.toLowerCase()];
   if (!nikTerdaftar) {
     throw new Error('NIK untuk nama "' + nama + '" belum terdaftar di sistem. Hubungi admin untuk melengkapi data karyawan terlebih dahulu.');
   }
@@ -100,28 +142,25 @@ function submitPengajuanIzin(nama, nik, jenis, tglMulai, tglAkhir, alasan, lampi
     throw new Error('Nama dan NIK tidak cocok dengan data karyawan terdaftar. Periksa kembali.');
   }
 
-  const lampiranUrl = saveLampiranToDrive_(lampiranBase64, lampiranFilename, lampiranMimeType);
+  const lampiranUrl = saveLampiranToDrive_(lampiranData, lampiranFilename, lampiranMimeType);
 
-  const lock = LockService.getScriptLock();
-  lock.waitLock(15000);
-  try {
+  return withScriptLock_(() => {
     const sheet = getOrCreatePengajuanSheet_();
     const id = generatePengajuanId_();
     sheet.appendRow([
       id, nama, nik, jenis,
-      Utilities.formatDate(dMulai, 'GMT+7', 'yyyy-MM-dd'),
-      Utilities.formatDate(dAkhir, 'GMT+7', 'yyyy-MM-dd'),
-      alasan, lampiranUrl, 'Pending', new Date(), '', '', ''
+      Utilities.formatDate(dMulai, PENGAJUAN_TZ_, 'yyyy-MM-dd'),
+      Utilities.formatDate(dAkhir, PENGAJUAN_TZ_, 'yyyy-MM-dd'),
+      guardSheetText_(alasan, PENGAJUAN_ALASAN_MAX_), lampiranUrl, 'Pending', new Date(), '', '', ''
     ]);
     SpreadsheetApp.flush();
     return { success: true, id: id };
-  } finally {
-    lock.releaseLock();
-  }
+  }, 15000);
 }
 
-function generatePengajuanId_() {
-  return 'PGJ' + Date.now() + Math.floor(Math.random() * 1000);
+/** Buang awalan "data:...;base64," bila ada (tanda tangan Base64 mentah dibiarkan). */
+function stripDataUrlPrefix_(text) {
+  return String(text).replace(/^data:[^;,]*;base64,/, '');
 }
 
 function getOrCreateLampiranFolder_() {
@@ -141,9 +180,8 @@ function saveLampiranToDrive_(base64Data, filename, mimeType) {
   try {
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
   } catch (e) {
-    // Domain Google Workspace kadang membatasi sharing publik; link tetap
-    // tersimpan (bisa dibuka oleh yang punya akses di dalam organisasi),
-    // ini tidak menggagalkan proses submit.
+    // Domain Workspace kadang melarang sharing publik; tautan tetap tersimpan
+    // (bisa dibuka oleh yang punya akses), pengajuan tidak digagalkan.
     Logger.log('Gagal set sharing publik utk lampiran: ' + e.message);
   }
   return file.getUrl();
@@ -152,90 +190,67 @@ function saveLampiranToDrive_(base64Data, filename, mimeType) {
 /* ============================ ADMIN (BUTUH LOGIN) ============================ */
 
 /**
- * Daftar pengajuan, opsional filter status ('Pending'/'Approved'/'Rejected'/'ALL').
- * PERBAIKAN: perbaikan baris berID kosong (data lama/rusak) sekarang dikumpulkan
- * dan ditulis SEKALI (batch setValues), bukan satu-per-satu di dalam loop —
- * ini yang sebelumnya bisa membuat UI macet di "Memuat..." kalau datanya banyak.
+ * Daftar pengajuan, opsional filter status ('Pending'/'Approved'/'Rejected'/'ALL'),
+ * terbaru di atas. Baris ber-ID kosong (data lama/rusak) diberi ID baru dan
+ * ditulis SEKALI (hanya kolom ID) setelah semua baris dibaca.
  */
 function getPengajuanList(status, token) {
-  const session = verifySession_(token);
-  if (   !isSuperAdminRole_(session.role)) throw new Error('Hanya admin yang boleh melihat daftar pengajuan.');
+  requirePengajuanAdmin_(token, 'Hanya admin yang boleh melihat daftar pengajuan.');
 
   const sheet = getOrCreatePengajuanSheet_();
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
 
-  const range = sheet.getRange(2, 1, lastRow - 1, PENGAJUAN_HEADER_.length);
-  const data = range.getValues();
+  const data = sheet.getRange(2, 1, lastRow - 1, PENGAJUAN_HEADER_.length).getValues();
 
   const rawStatus = String(status || '').trim();
   const filterStatus = (!rawStatus || rawStatus.toUpperCase() === 'ALL' || rawStatus.toUpperCase() === 'SEMUA')
     ? 'ALL' : rawStatus;
 
   const result = [];
+  const idColumn = data.map(r => [r[0]]);
   let idsFixed = false;
 
   data.forEach((r, i) => {
     const nama = String(r[1] || '').trim();
-    if (!nama) return; // baris benar-benar kosong, lewati
+    if (!nama) return; // baris benar-benar kosong
 
-    // Perbaikan ID kosong (data lama/rusak): generate ID baru DI MEMORI dulu,
-    // lalu ditulis balik ke `data` supaya batch-write di akhir bisa menuliskannya
-    // sekaligus (tidak menulis ke sheet satu-per-satu di sini).
     let id = String(r[0] || '').trim();
     if (!id) {
       id = generatePengajuanId_() + i;
-      data[i][0] = id;
+      idColumn[i][0] = id;
       idsFixed = true;
     }
 
     const rowStatus = String(r[8] || '').trim();
     if (filterStatus !== 'ALL' && rowStatus !== filterStatus) return;
 
-    
-    // PENTING: Sheets bisa otomatis mengonversi string tanggal "yyyy-MM-dd" yang
-// ditulis submitPengajuanIzin() menjadi tipe Date asli saat disimpan. Kalau ini
-// terjadi, mengembalikan objek Date apa adanya akan membuat JSON.stringify()
-// memanggil .toISOString() (konversi ke UTC) -> tanggal tampak mundur 1 hari
-// dan selalu berjam 17:00:00.000Z (karena WIB = UTC+7). Maka di sini selalu
-// diformat ulang jadi string yyyy-MM-dd di zona waktu GMT+7, apa pun tipe aslinya.
-const tglMulaiStr = r[4] instanceof Date ? Utilities.formatDate(r[4], 'GMT+7', 'yyyy-MM-dd') : String(r[4] || '');
-const tglAkhirStr = r[5] instanceof Date ? Utilities.formatDate(r[5], 'GMT+7', 'yyyy-MM-dd') : String(r[5] || '');
-
-result.push({
-  id: id, nama: r[1], nik: r[2], jenis: r[3],
-  tglMulai: tglMulaiStr, tglAkhir: tglAkhirStr, alasan: r[6], lampiranUrl: r[7],
-  status: rowStatus,
-  diajukanPada: r[9] instanceof Date ? r[9].toISOString() : String(r[9] || ''),
-  diprosesOleh: r[10], diprosesPada: r[11] instanceof Date ? r[11].toISOString() : String(r[11] || ''),
-  catatanAdmin: r[12]
-});
-});
+    result.push({
+      id: id, nama: r[1], nik: r[2], jenis: r[3],
+      tglMulai: pengajuanDateStr_(r[4]), tglAkhir: pengajuanDateStr_(r[5]), alasan: r[6], lampiranUrl: r[7],
+      status: rowStatus,
+      diajukanPada: r[9] instanceof Date ? r[9].toISOString() : String(r[9] || ''),
+      diprosesOleh: r[10], diprosesPada: r[11] instanceof Date ? r[11].toISOString() : String(r[11] || ''),
+      catatanAdmin: r[12]
+    });
+  });
 
   if (idsFixed) {
-    // Satu kali tulis balik seluruh blok data (termasuk ID yang baru diperbaiki).
-    const lock = LockService.getScriptLock();
-    lock.waitLock(10000);
-    try {
-      range.setValues(data);
+    withScriptLock_(() => {
+      sheet.getRange(2, 1, idColumn.length, 1).setValues(idColumn);
       SpreadsheetApp.flush();
-    } finally {
-      lock.releaseLock();
-    }
+    }, 10000);
   }
 
-  return result.reverse(); // terbaru duluan
-  }
+  return result.reverse();
+}
 
 /**
- * Wrapper "aman" dari getPengajuanList: frontend (loadPengajuanList_ di
- * JavaScript.html) memanggil fungsi INI, dan mengharapkan hasilnya berupa
- * TEKS JSON (bukan array/object mentah), karena di sisi frontend hasilnya
- * di-parse manual pakai JSON.parse().
+ * Pembungkus: frontend (loadPengajuanList_) memanggil fungsi INI dan
+ * mengharapkan TEKS JSON yang di-parse sendiri.
  */
 function getPengajuanListSafe(status, token) {
-  const result = getPengajuanList(status, token);
-  return JSON.stringify(result);
+  return JSON.stringify(getPengajuanList(status, token));
 }
 
 function findPengajuanRow_(sheet, id) {
@@ -246,62 +261,80 @@ function findPengajuanRow_(sheet, id) {
   return idx === -1 ? -1 : idx + 2;
 }
 
-/** Setujui pengajuan: tulis kode I/S/C ke Realisasi utk rentang tanggalnya, lalu tandai status Approved. */
+/**
+ * Setujui pengajuan: tulis kode I/S/C ke Realisasi untuk rentang tanggalnya,
+ * lalu tandai Approved. Pemeriksaan status, penulisan Realisasi, dan penandaan
+ * berjalan di dalam satu lock, jadi dua admin yang menyetujui bersamaan tidak
+ * bisa memproses pengajuan yang sama dua kali.
+ */
 function approvePengajuan(id, token) {
-  const session = verifySession_(token);
-  if (   !isSuperAdminRole_(session.role)) throw new Error('Hanya admin yang boleh menyetujui pengajuan.');
+  const session = requirePengajuanAdmin_(token, 'Hanya admin yang boleh menyetujui pengajuan.');
 
-  const sheet = getOrCreatePengajuanSheet_();
-  const rowNum = findPengajuanRow_(sheet, id);
-  if (rowNum === -1) throw new Error('Pengajuan tidak ditemukan.');
+  const done = withScriptLock_(() => {
+    const sheet = getOrCreatePengajuanSheet_();
+    const rowNum = findPengajuanRow_(sheet, id);
+    if (rowNum === -1) throw new Error('Pengajuan tidak ditemukan.');
 
-  const row = sheet.getRange(rowNum, 1, 1, PENGAJUAN_HEADER_.length).getValues()[0];
-  const [, nama, , jenis, tglMulai, tglAkhir, , , status] = row;
-  if (status !== 'Pending') throw new Error('Pengajuan ini sudah diproses sebelumnya (status: ' + status + ').');
+    const row = sheet.getRange(rowNum, 1, 1, PENGAJUAN_HEADER_.length).getValues()[0];
+    const nama = row[1], jenis = row[3], status = row[8];
+    if (status !== 'Pending') throw new Error('Pengajuan ini sudah diproses sebelumnya (status: ' + status + ').');
 
-  const applyResult = applyPengajuanToRealisasi_(nama, jenis, tglMulai, tglAkhir);
+    const tglMulai = pengajuanDateStr_(row[4]);
+    const tglAkhir = pengajuanDateStr_(row[5]);
+    const applyResult = applyPengajuanToRealisasi_(nama, jenis, tglMulai, tglAkhir);
 
-  sheet.getRange(rowNum, 9).setValue('Approved');
-  sheet.getRange(rowNum, 11).setValue(session.username);
-  sheet.getRange(rowNum, 12).setValue(new Date());
-  SpreadsheetApp.flush();
+    sheet.getRange(rowNum, 9).setValue('Approved');
+    sheet.getRange(rowNum, 11, 1, 2).setValues([[session.username, new Date()]]);
+    SpreadsheetApp.flush();
+    return { nama: nama, jenis: jenis, tglMulai: tglMulai, tglAkhir: tglAkhir, applyResult: applyResult };
+  }, 20000);
 
-  kirimEmailNotifikasiPengajuan_(nama, jenis, tglMulai, tglAkhir, 'Approved', '');
+  catatAuditLog_(session, 'Approve', 'Pengajuan Izin', id,
+    done.nama + ' - ' + done.jenis + ' ' + done.tglMulai + ' s/d ' + done.tglAkhir +
+    '; hari diterapkan: ' + done.applyResult.appliedDays.length +
+    (done.applyResult.outOfRangeDays.length ? '; di luar periode aktif: ' + done.applyResult.outOfRangeDays.length : ''));
 
-  // Balikin daftar Pending saja (bukan ALL) supaya baris yang baru
-  // di-approve otomatis hilang dari tabel "Menunggu Persetujuan" di frontend.
-  const result = getPengajuanList('Pending', token);
-  return { list: result, applyInfo: applyResult };
+  kirimEmailNotifikasiPengajuan_(done.nama, done.jenis, done.tglMulai, done.tglAkhir, 'Approved', '');
+
+  // Kembalikan daftar Pending supaya baris yang baru disetujui hilang dari tabel.
+  return { list: getPengajuanList('Pending', token), applyInfo: done.applyResult };
 }
 
 /** Tolak pengajuan, dengan catatan alasan penolakan. */
 function rejectPengajuan(id, catatan, token) {
-  const session = verifySession_(token);
-  if (   !isSuperAdminRole_(session.role)) throw new Error('Hanya admin yang boleh menolak pengajuan.');
+  const session = requirePengajuanAdmin_(token, 'Hanya admin yang boleh menolak pengajuan.');
+  const catatanBersih = String(catatan || '').trim().substring(0, PENGAJUAN_CATATAN_MAX_);
 
-  const sheet = getOrCreatePengajuanSheet_();
-  const rowNum = findPengajuanRow_(sheet, id);
-  if (rowNum === -1) throw new Error('Pengajuan tidak ditemukan.');
+  const done = withScriptLock_(() => {
+    const sheet = getOrCreatePengajuanSheet_();
+    const rowNum = findPengajuanRow_(sheet, id);
+    if (rowNum === -1) throw new Error('Pengajuan tidak ditemukan.');
 
-  const status = sheet.getRange(rowNum, 9).getValue();
-  if (status !== 'Pending') throw new Error('Pengajuan ini sudah diproses sebelumnya (status: ' + status + ').');
+    const status = sheet.getRange(rowNum, 9).getValue();
+    if (status !== 'Pending') throw new Error('Pengajuan ini sudah diproses sebelumnya (status: ' + status + ').');
 
-  sheet.getRange(rowNum, 9).setValue('Rejected');
-  sheet.getRange(rowNum, 11).setValue(session.username);
-  sheet.getRange(rowNum, 12).setValue(new Date());
-  sheet.getRange(rowNum, 13).setValue(String(catatan || '').trim());
-  SpreadsheetApp.flush();
+    sheet.getRange(rowNum, 9).setValue('Rejected');
+    sheet.getRange(rowNum, 11, 1, 2).setValues([[session.username, new Date()]]);
+    sheet.getRange(rowNum, 13).setValue(guardSheetText_(catatanBersih, PENGAJUAN_CATATAN_MAX_));
+    SpreadsheetApp.flush();
 
-  const rowFull = sheet.getRange(rowNum, 1, 1, PENGAJUAN_HEADER_.length).getValues()[0];
-  kirimEmailNotifikasiPengajuan_(rowFull[1], rowFull[3], rowFull[4], rowFull[5], 'Rejected', catatan);
+    const rowFull = sheet.getRange(rowNum, 1, 1, PENGAJUAN_HEADER_.length).getValues()[0];
+    return { nama: rowFull[1], jenis: rowFull[3], tglMulai: pengajuanDateStr_(rowFull[4]), tglAkhir: pengajuanDateStr_(rowFull[5]) };
+  }, 15000);
+
+  catatAuditLog_(session, 'Reject', 'Pengajuan Izin', id,
+    done.nama + ' - ' + done.jenis + ' ' + done.tglMulai + ' s/d ' + done.tglAkhir +
+    (catatanBersih ? '; catatan: ' + catatanBersih : ''));
+
+  kirimEmailNotifikasiPengajuan_(done.nama, done.jenis, done.tglMulai, done.tglAkhir, 'Rejected', catatanBersih);
 
   return getPengajuanList('Pending', token);
 }
 
-/** Hitung ringan jumlah pengajuan Pending saja — untuk badge notifikasi di sidebar. */
+/** Jumlah pengajuan Pending (badge notifikasi sidebar). Non-admin: 0. */
 function getPengajuanPendingCount(token) {
   const session = verifySession_(token);
-  if (   !isSuperAdminRole_(session.role)) return { count: 0 };
+  if (!isSuperAdminRole_(session.role)) return { count: 0 };
 
   const sheet = getOrCreatePengajuanSheet_();
   const lastRow = sheet.getLastRow();
@@ -320,10 +353,11 @@ function getPengajuanPendingCount(token) {
 }
 
 /**
- * Tulis kode I/S/C ke sheet Realisasi (periode AKTIF saja) utk rentang
- * tglMulai..tglAkhir milik satu karyawan. Tanggal yang jatuh di LUAR
- * bulan/tahun periode aktif dilaporkan sebagai outOfRangeDays (tidak
- * ditulis, karena sheet Realisasi cuma sejumlah dayCount kolom).
+ * Tulis kode I/S/C ke Realisasi (periode AKTIF saja) untuk rentang tglMulai..tglAkhir
+ * ('yyyy-MM-dd') milik satu karyawan. Tanggal di luar bulan/tahun periode aktif
+ * dilaporkan di outOfRangeDays (tidak ditulis).
+ * DIPANGGIL DI DALAM LOCK (approvePengajuan); fungsi ini tidak mengambil lock sendiri.
+ * Semua pemeriksaan dilakukan sebelum ada sel yang ditulis.
  */
 function applyPengajuanToRealisasi_(nama, jenis, tglMulaiStr, tglAkhirStr) {
   const kode = PENGAJUAN_JENIS_KODE_[jenis];
@@ -331,15 +365,16 @@ function applyPengajuanToRealisasi_(nama, jenis, tglMulaiStr, tglAkhirStr) {
 
   const realisasiSheet = getSheet_(CONFIG.SHEET_REALISASI);
   const periodText = String(realisasiSheet.getRange(2, 1).getValue() || '').trim();
-  const my = parsePeriodMonthYear_(periodText); // dari 10_AttendanceLog.gs
+  const my = parsePeriodMonthYear_(periodText);
   if (!my) {
     throw new Error('Periode aktif ("' + periodText + '") tidak bisa dibaca bulan/tahunnya, tidak bisa menerapkan pengajuan ke Realisasi.');
   }
 
   const lastRow = getLastEmployeeRow_(realisasiSheet);
   const numRows = lastRow - CONFIG.DATA_START_ROW + 1;
-  const names = realisasiSheet.getRange(CONFIG.DATA_START_ROW, 2, numRows, 1).getValues()
-    .map(r => String(r[0] || '').trim().toLowerCase());
+  const names = numRows > 0
+    ? realisasiSheet.getRange(CONFIG.DATA_START_ROW, 2, numRows, 1).getValues().map(r => String(r[0] || '').trim().toLowerCase())
+    : [];
   const idx = names.indexOf(String(nama).trim().toLowerCase());
   if (idx === -1) {
     throw new Error('Karyawan "' + nama + '" tidak ditemukan di sheet Realisasi periode aktif.');
@@ -347,48 +382,49 @@ function applyPengajuanToRealisasi_(nama, jenis, tglMulaiStr, tglAkhirStr) {
   const rowIndex = CONFIG.DATA_START_ROW + idx;
   const dayCount = getDayColCount_(realisasiSheet);
 
-  const dMulai = new Date(tglMulaiStr);
-  const dAkhir = new Date(tglAkhirStr);
+  const mulai = parsePengajuanYmd_(tglMulaiStr);
+  const akhir = parsePengajuanYmd_(tglAkhirStr);
+  if (!mulai || !akhir) {
+    throw new Error('Tanggal pada pengajuan ini tidak valid ("' + tglMulaiStr + '" s/d "' + tglAkhirStr + '"). Tolak pengajuan dan minta karyawan mengajukan ulang.');
+  }
+  const startTime = new Date(mulai.y, mulai.m - 1, mulai.d).getTime();
+  const endTime = new Date(akhir.y, akhir.m - 1, akhir.d).getTime();
+  const totalHari = Math.round((endTime - startTime) / 86400000) + 1;
+  if (totalHari > PENGAJUAN_RENTANG_MAX_HARI_) {
+    throw new Error('Rentang pengajuan ' + totalHari + ' hari melebihi batas ' + PENGAJUAN_RENTANG_MAX_HARI_ + ' hari. Tolak pengajuan dan minta karyawan memecahnya.');
+  }
+
   const appliedDays = [];
   const outOfRangeDays = [];
-
-  const lock = LockService.getScriptLock();
-  lock.waitLock(15000);
-  try {
-    let cursor = new Date(dMulai);
-    let safety = 0;
-    while (cursor.getTime() <= dAkhir.getTime() && safety < 62) {
-      safety++;
-      if (cursor.getFullYear() === my.year && cursor.getMonth() === my.monthIndex) {
-        const dayNum = cursor.getDate();
-        if (dayNum >= 1 && dayNum <= dayCount) {
-          const col = CONFIG.FIRST_DAY_COL + (dayNum - 1);
-          realisasiSheet.getRange(rowIndex, col).setValue(kode);
-          appliedDays.push(dayNum);
-        } else {
-          outOfRangeDays.push(Utilities.formatDate(cursor, 'GMT+7', 'dd/MM/yyyy'));
-        }
-      } else {
-        outOfRangeDays.push(Utilities.formatDate(cursor, 'GMT+7', 'dd/MM/yyyy'));
-      }
-      cursor.setDate(cursor.getDate() + 1);
-    }
-    SpreadsheetApp.flush();
-  } finally {
-    lock.releaseLock();
+  for (let k = 0; k < totalHari; k++) {
+    const cursor = new Date(mulai.y, mulai.m - 1, mulai.d + k);
+    const inPeriod = cursor.getFullYear() === my.year && cursor.getMonth() === my.monthIndex;
+    const dayNum = cursor.getDate();
+    if (inPeriod && dayNum >= 1 && dayNum <= dayCount) appliedDays.push(dayNum);
+    else outOfRangeDays.push(Utilities.formatDate(cursor, PENGAJUAN_TZ_, 'dd/MM/yyyy'));
   }
+
+  // Hari yang diterapkan selalu berurutan (satu bulan), jadi cukup satu blok sel.
+  if (appliedDays.length) {
+    const firstCol = CONFIG.FIRST_DAY_COL + (appliedDays[0] - 1);
+    realisasiSheet.getRange(rowIndex, firstCol, 1, appliedDays.length)
+      .setValues([appliedDays.map(() => kode)]);
+  }
+  SpreadsheetApp.flush();
 
   return { appliedDays: appliedDays, outOfRangeDays: outOfRangeDays };
 }
 
-/** Kirim email notifikasi hasil pengajuan (Approved/Rejected) ke karyawan, kalau emailnya terdaftar. */
+/**
+ * Kirim email hasil pengajuan (Approved/Rejected) ke karyawan bila emailnya terdaftar.
+ * Kegagalan kirim tidak boleh menggagalkan approve/reject.
+ */
 function kirimEmailNotifikasiPengajuan_(nama, jenis, tglMulai, tglAkhir, statusBaru, catatanAdmin) {
   try {
-    const tglMulaiFmt = tglMulai instanceof Date ? Utilities.formatDate(tglMulai, 'GMT+7', 'dd/MM/yyyy') : String(tglMulai);
-    const tglAkhirFmt = tglAkhir instanceof Date ? Utilities.formatDate(tglAkhir, 'GMT+7', 'dd/MM/yyyy') : String(tglAkhir);
-    kirimEmailNotifikasiPengajuan_(nama, jenis, tglMulaiFmt, tglAkhirFmt, 'Approved', '');
-    const masterMap = getKaryawanMasterMap_();
-    const master = masterMap[String(nama).trim().toLowerCase()];
+    const tglMulaiFmt = formatTanggalPengajuan_(tglMulai);
+    const tglAkhirFmt = formatTanggalPengajuan_(tglAkhir);
+
+    const master = getKaryawanMasterMap_()[String(nama).trim().toLowerCase()];
     const email = master ? String(master.email || '').trim() : '';
     if (!email) {
       Logger.log('kirimEmailNotifikasiPengajuan_: email untuk "' + nama + '" belum terdaftar, notifikasi dilewati.');
@@ -419,7 +455,6 @@ function kirimEmailNotifikasiPengajuan_(nama, jenis, tglMulai, tglAkhir, statusB
 
     MailApp.sendEmail({ to: email, subject: subject, htmlBody: htmlBody });
   } catch (e) {
-    // Jangan sampai gagal kirim email menggagalkan proses approve/reject.
     Logger.log('kirimEmailNotifikasiPengajuan_ gagal: ' + e.message);
   }
 }
@@ -427,11 +462,10 @@ function kirimEmailNotifikasiPengajuan_(nama, jenis, tglMulai, tglAkhir, statusB
 /* ============================ AUTO-TANDAI ALFA (TRIGGER HARIAN) ============================ */
 
 /**
- * Dipanggil otomatis tiap hari (lihat setupAutoAlfaTrigger()). Untuk
- * TANGGAL HARI INI: kalau seorang karyawan ada jadwal (bukan OFF/kosong)
- * tapi sel Realisasi-nya masih kosong, DAN tidak ada pengajuan Izin/
- * Sakit/Cuti (Pending ATAU Approved) yang mencakup tanggal ini, maka sel
- * itu otomatis ditandai "A" (Alfa).
+ * Dipanggil otomatis tiap hari (lihat setupAutoAlfaTrigger). Untuk TANGGAL HARI INI:
+ * karyawan yang berjadwal (bukan OFF/kosong), sel Realisasi-nya masih kosong, dan
+ * tidak punya pengajuan Pending/Approved yang mencakup hari ini, ditandai "A".
+ * Sel dibaca di dalam lock, jadi isian yang masuk sesaat sebelumnya tidak tertimpa.
  */
 function autoTandaiAlfaHarian_() {
   const jadwalSheet = getSheet_(CONFIG.SHEET_JADWAL);
@@ -456,18 +490,14 @@ function autoTandaiAlfaHarian_() {
   if (numRows <= 0 || dayNum > dayCount) return;
 
   const col = CONFIG.FIRST_DAY_COL + (dayNum - 1);
-
-  const jadwalCol = jadwalSheet.getRange(CONFIG.DATA_START_ROW, col, numRows, 1).getValues();
-  const realisasiCol = realisasiSheet.getRange(CONFIG.DATA_START_ROW, col, numRows, 1).getValues();
-  const names = realisasiSheet.getRange(CONFIG.DATA_START_ROW, 2, numRows, 1).getValues();
-
-  // Kumpulkan nama yang punya pengajuan Pending/Approved mencakup HARI INI.
   const namaTerlindungi = getNamaDenganPengajuanAktifPadaTanggal_(today);
 
-  let ditandai = 0;
-  const lock = LockService.getScriptLock();
-  lock.waitLock(20000);
-  try {
+  const ditandai = withScriptLock_(() => {
+    const jadwalCol = jadwalSheet.getRange(CONFIG.DATA_START_ROW, col, numRows, 1).getValues();
+    const realisasiCol = realisasiSheet.getRange(CONFIG.DATA_START_ROW, col, numRows, 1).getValues();
+    const names = realisasiSheet.getRange(CONFIG.DATA_START_ROW, 2, numRows, 1).getValues();
+
+    let count = 0;
     for (let i = 0; i < numRows; i++) {
       const jadwalKode = String(jadwalCol[i][0] || '').trim().toUpperCase();
       const realKosong = (realisasiCol[i][0] === '' || realisasiCol[i][0] === null || realisasiCol[i][0] === undefined);
@@ -475,19 +505,18 @@ function autoTandaiAlfaHarian_() {
 
       if (jadwalKode && jadwalKode !== 'OFF' && realKosong && nama && !namaTerlindungi.has(nama.toLowerCase())) {
         realisasiSheet.getRange(CONFIG.DATA_START_ROW + i, col).setValue('A');
-        ditandai++;
+        count++;
       }
     }
-    if (ditandai > 0) SpreadsheetApp.flush();
-  } finally {
-    lock.releaseLock();
-  }
+    if (count > 0) SpreadsheetApp.flush();
+    return count;
+  }, 20000);
 
   Logger.log('autoTandaiAlfaHarian_: ' + ditandai + ' karyawan ditandai Alfa untuk tanggal ' +
-    Utilities.formatDate(today, 'GMT+7', 'dd/MM/yyyy') + '.');
+    Utilities.formatDate(today, PENGAJUAN_TZ_, 'dd/MM/yyyy') + '.');
 }
 
-/** Set nama(lowercase) yang punya pengajuan Pending/Approved yang mencakup tanggal tertentu. */
+/** Set nama (huruf kecil) yang punya pengajuan Pending/Approved yang mencakup tanggal tertentu. */
 function getNamaDenganPengajuanAktifPadaTanggal_(targetDate) {
   const set = new Set();
   const sheet = getOrCreatePengajuanSheet_();
@@ -495,12 +524,12 @@ function getNamaDenganPengajuanAktifPadaTanggal_(targetDate) {
   if (lastRow < 2) return set;
 
   const data = sheet.getRange(2, 1, lastRow - 1, 9).getValues(); // sampai kolom Status
-  const targetStr = Utilities.formatDate(targetDate, 'GMT+7', 'yyyy-MM-dd');
+  const targetStr = Utilities.formatDate(targetDate, PENGAJUAN_TZ_, 'yyyy-MM-dd');
 
   data.forEach(r => {
     const nama = String(r[1] || '').trim().toLowerCase();
-    const tglMulai = String(r[4] || '');
-    const tglAkhir = String(r[5] || '');
+    const tglMulai = pengajuanDateStr_(r[4]);
+    const tglAkhir = pengajuanDateStr_(r[5]);
     const status = String(r[8] || '');
     if (!nama || (status !== 'Pending' && status !== 'Approved')) return;
     if (tglMulai <= targetStr && targetStr <= tglAkhir) set.add(nama);
@@ -509,11 +538,7 @@ function getNamaDenganPengajuanAktifPadaTanggal_(targetDate) {
   return set;
 }
 
-/**
- * JALANKAN SEKALI SAJA dari Apps Script Editor untuk memasang trigger
- * otomatis yang menandai Alfa setiap hari jam 23:00. Aman dijalankan
- * berkali-kali (trigger lama dengan handler sama dihapus dulu).
- */
+/** JALANKAN SEKALI dari editor: pasang trigger yang menandai Alfa tiap hari jam 23:00. Aman diulang. */
 function setupAutoAlfaTrigger() {
   ScriptApp.getProjectTriggers().forEach(t => {
     if (t.getHandlerFunction() === 'autoTandaiAlfaHarian_') {
@@ -531,19 +556,17 @@ function setupAutoAlfaTrigger() {
 }
 
 /**
- * Utilitas debug manual: jalankan LANGSUNG dari editor (tombol ▶) untuk
- * ngecek isi sheet PengajuanIzin apa adanya, tanpa lewat token/session/
- * web app sama sekali. Hasilnya muncul di panel Log Eksekusi. Berguna
- * kalau modul ini bermasalah lagi di kemudian hari.
+ * Alat debug manual (jalankan dari editor): tampilkan isi sheet PengajuanIzin apa
+ * adanya di Log Eksekusi, tanpa token/session/web app.
  */
 function debugPengajuanRaw() {
   const sheet = getOrCreatePengajuanSheet_();
   const lastRow = sheet.getLastRow();
-  Logger.log('Spreadsheet aktif: ' + SpreadsheetApp.getActiveSpreadsheet().getUrl());
+  Logger.log('Spreadsheet aktif: ' + getSpreadsheet_().getUrl());
   Logger.log('Nama sheet: ' + sheet.getName() + ', lastRow: ' + lastRow);
   if (lastRow < 2) { Logger.log('Tidak ada data.'); return; }
   const data = sheet.getRange(2, 1, lastRow - 1, PENGAJUAN_HEADER_.length).getValues();
   data.forEach((r, i) => {
-    Logger.log('Baris ' + (i + 2) + ': ID=[' + r[0] + '] Nama=[' + r[1] + '] Status=[' + r[8] + ']');
+    Logger.log('Baris ' + (i + 1 + 1) + ': ID=[' + r[0] + '] Nama=[' + r[1] + '] Status=[' + r[8] + ']');
   });
 }
