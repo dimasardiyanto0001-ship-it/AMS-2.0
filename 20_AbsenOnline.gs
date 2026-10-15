@@ -1,14 +1,31 @@
 /*************************************************************
  * 20_AbsenOnline.gs
- * Backend halaman publik "Absen Online": absen GPS (submitAbsenOnline)
- * + riwayat absen (getRiwayatAbsen). Tanpa token — verifikasi Nama+NIK.
+ * Backend halaman publik "Absen Online": absen GPS + selfie
+ * (submitAbsenOnline), riwayat (getRiwayatAbsen), pencarian nama,
+ * foto profil, dan penghapusan foto lama (retensi).
+ * Tanpa token: identitas = Nama + NIK yang cocok dengan DataKaryawan.
+ *
+ * Sheet: LogAbsenOnline (log mentah, tersembunyi),
+ *        SettingLokasiAbsen (lat, lng, radius; tersembunyi).
+ * Dipakai juga oleh 24_BackupReliever.gs: getSettingLokasiAbsen_,
+ * haversineDistanceMeter_, getOrCreateFotoAbsenBulanFolder_, dan
+ * oleh 32_JadwalHariIni.gs: formatJam_.
  *************************************************************/
 
 const SHEET_LOG_ABSEN_ONLINE = 'LogAbsenOnline';
 const SHEET_SETTING_LOKASI_ABSEN = 'SettingLokasiAbsen';
+const LOG_ABSEN_ONLINE_HEADERS_ = ['Timestamp', 'Tanggal', 'Nama', 'NIK', 'Jenis', 'Jam', 'Latitude', 'Longitude', 'JarakMeter', 'Status', 'FotoUrl'];
+const LOG_ABSEN_FOTO_COL_ = 11;
+const FOTO_ABSEN_ROOT_FOLDER_NAME_ = 'Foto Absen Online - AMS Housekeeping';
+const FOTO_PROFIL_ROOT_FOLDER_NAME_ = 'Foto Profil Karyawan - AMS Housekeeping';
+const RETENSI_FOTO_ABSEN_BULAN_ = 3;
+const FOTO_MAX_BYTES_ = 6 * 1024 * 1024;   // foto selfie/profil, setelah didekode
+const JAM_KERJA_MAKS_ = 16;                // durasi absen Masuk-Pulang di atas ini dianggap salah ketik, tidak ditulis ke JamKerja
+
+/* ============================ LOKASI ============================ */
 
 function getOrCreateSettingLokasiAbsenSheet_() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSpreadsheet_();
   let sheet = ss.getSheetByName(SHEET_SETTING_LOKASI_ABSEN);
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_SETTING_LOKASI_ABSEN);
@@ -36,14 +53,14 @@ function haversineDistanceMeter_(lat1, lng1, lat2, lng2) {
   return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
 }
 
+/* ============================ LOG ============================ */
+
 function getOrCreateLogAbsenOnlineSheet_() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSpreadsheet_();
   let sheet = ss.getSheetByName(SHEET_LOG_ABSEN_ONLINE);
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_LOG_ABSEN_ONLINE);
-    sheet.getRange(1, 1, 1, 11).setValues([[
-      'Timestamp', 'Tanggal', 'Nama', 'NIK', 'Jenis', 'Jam', 'Latitude', 'Longitude', 'JarakMeter', 'Status', 'FotoUrl'
-    ]]).setFontWeight('bold');
+    sheet.getRange(1, 1, 1, LOG_ABSEN_ONLINE_HEADERS_.length).setValues([LOG_ABSEN_ONLINE_HEADERS_]).setFontWeight('bold');
     sheet.hideSheet();
   } else {
     ensureLogAbsenOnlineHasFotoColumn_(sheet);
@@ -52,15 +69,16 @@ function getOrCreateLogAbsenOnlineSheet_() {
 }
 
 function ensureLogAbsenOnlineHasFotoColumn_(sheet) {
-  const header = sheet.getRange(1, 11).getValue();
+  const header = sheet.getRange(1, LOG_ABSEN_FOTO_COL_).getValue();
   if (header !== 'FotoUrl') {
-    sheet.getRange(1, 11).setValue('FotoUrl').setFontWeight('bold');
+    sheet.getRange(1, LOG_ABSEN_FOTO_COL_).setValue('FotoUrl').setFontWeight('bold');
   }
 }
 
+/* ============================ VERIFIKASI ============================ */
+
 function verifyKaryawanByNamaNik_(nama, nik) {
-  const masterMap = getKaryawanMasterMap_();
-  const master = masterMap[String(nama || '').trim().toLowerCase()];
+  const master = getKaryawanMasterMap_()[String(nama || '').trim().toLowerCase()];
   if (!master) throw new Error('Nama karyawan tidak ditemukan.');
   if (String(master.nik || '').trim() !== String(nik || '').trim()) {
     throw new Error('NIK tidak sesuai dengan data karyawan.');
@@ -73,15 +91,112 @@ function verifyLoginAbsenOnline(nama, nik) {
   return { department: master.department || '-', fotoProfilUrl: master.fotoProfilUrl || '' };
 }
 
+/**
+ * Pencarian nama untuk autocomplete (maks 10 hasil paling relevan).
+ * Hasil: { nama, nik:'', label }. NIK TIDAK dikembalikan: fungsi ini publik dan
+ * NIK adalah satu-satunya "kata sandi" absen, jadi siapa pun bisa absen atas
+ * nama orang lain bila NIK ikut terkirim. Frontend meminta NIK diketik sendiri.
+ */
+function searchKaryawanUntukAbsen(query) {
+  query = String(query || '').trim().toLowerCase();
+  if (!query) return [];
+
+  const sheet = getOrCreateNikSheet_();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  const data = sheet.getRange(2, 1, lastRow - 1, 1).getValues(); // kolom A = Nama
+  const results = [];
+
+  data.forEach(row => {
+    const nama = String(row[0] || '').trim();
+    if (!nama) return;
+    const namaLower = nama.toLowerCase();
+
+    let score = -1;
+    if (namaLower === query) score = 100;
+    else if (namaLower.startsWith(query)) score = 80;
+    else if (namaLower.includes(query)) score = 50;
+
+    if (score > -1) results.push({ nama: nama, score: score });
+  });
+
+  results.sort((a, b) => b.score - a.score || a.nama.localeCompare(b.nama));
+  return results.slice(0, 10).map(r => ({ nama: r.nama, nik: '', label: r.nama }));
+}
+
+/* ============================ FOTO ============================ */
+
+function getOrCreateFotoAbsenRootFolder_() {
+  const it = DriveApp.getFoldersByName(FOTO_ABSEN_ROOT_FOLDER_NAME_);
+  if (it.hasNext()) return it.next();
+  return DriveApp.createFolder(FOTO_ABSEN_ROOT_FOLDER_NAME_);
+}
+
+function getOrCreateFotoAbsenBulanFolder_(tahun, bulan) {
+  const root = getOrCreateFotoAbsenRootFolder_();
+  const namaFolder = tahun + '-' + String(bulan).padStart(2, '0');
+  const it = root.getFoldersByName(namaFolder);
+  if (it.hasNext()) return it.next();
+  return root.createFolder(namaFolder);
+}
+
+/** Base64 gambar (boleh berawalan data:image/...;base64,) -> Blob JPEG bernama fileName. Error bila kosong atau > FOTO_MAX_BYTES_. */
+function decodeFotoBase64_(fotoBase64, fileName) {
+  const raw = String(fotoBase64).replace(/^data:image\/\w+;base64,/, '');
+  if (Math.floor(raw.length * 3 / 4) > FOTO_MAX_BYTES_) {
+    throw new Error('Ukuran foto maksimal ' + (FOTO_MAX_BYTES_ / 1024 / 1024) + ' MB.');
+  }
+  return Utilities.newBlob(Utilities.base64Decode(raw), 'image/jpeg', fileName);
+}
+
+/** Simpan foto selfie ke folder bulan berjalan; bila gagal, kembalikan '' (absen tetap dicatat). */
+function simpanFotoAbsen_(nama, jenis, fotoBase64, now, tz) {
+  try {
+    const folder = getOrCreateFotoAbsenBulanFolder_(now.getFullYear(), now.getMonth() + 1);
+    const namaFile = nama.replace(/[^\w]+/g, '_') + '_' + jenis + '_' +
+      Utilities.formatDate(now, tz, 'yyyyMMdd_HHmmss') + '.jpg';
+    return folder.createFile(decodeFotoBase64_(fotoBase64, namaFile)).getUrl();
+  } catch (e) {
+    Logger.log('Gagal simpan foto absen untuk ' + nama + ': ' + e.message);
+    return '';
+  }
+}
+
+/* ============================ ABSEN ============================ */
+
+/** Durasi (jam) antara dua jam "HH:mm"; keluar lebih awal dari masuk dianggap lewat tengah malam. */
+function hitungDurasiJamKerja_(masukStr, keluarStr) {
+  const toMinutes = s => {
+    const parts = String(s).split(':');
+    const h = parseInt(parts[0], 10) || 0;
+    const m = parseInt(parts[1], 10) || 0;
+    return h * 60 + m;
+  };
+  let diff = toMinutes(keluarStr) - toMinutes(masukStr);
+  if (diff < 0) diff += 24 * 60;
+  return diff / 60;
+}
+
+/**
+ * Catat absen Masuk/Pulang. Selalu masuk ke LogAbsenOnline (beserta foto).
+ * Ke Realisasi (+ JamScan, JamKerja) hanya bila periode aktif = bulan berjalan
+ * dan karyawan ada di Realisasi: sel yang sudah S/I/C/A/1/2 tidak diubah.
+ * Hasil: { status, jam, jarak [, periodeBelumDiganti, periode] }.
+ */
 function submitAbsenOnline(nama, nik, jenis, lat, lng, akurasi, fotoBase64) {
   nama = String(nama || '').trim();
   nik = String(nik || '').trim();
   jenis = String(jenis || '').trim();
+  const latRaw = lat, lngRaw = lng;
   lat = Number(lat); lng = Number(lng);
 
   if (!nama || !nik) throw new Error('Nama dan NIK wajib diisi.');
   if (jenis !== 'Masuk' && jenis !== 'Pulang') throw new Error('Jenis absen tidak valid.');
-  if (isNaN(lat) || isNaN(lng)) throw new Error('Data lokasi GPS tidak valid.');
+  const gpsKosong = (latRaw === null || latRaw === '' || lngRaw === null || lngRaw === '');
+  if (gpsKosong || !isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    throw new Error('Data lokasi GPS tidak valid.');
+  }
   if (!fotoBase64) throw new Error('Foto selfie wajib diambil sebelum absen.');
 
   verifyKaryawanByNamaNik_(nama, nik);
@@ -95,36 +210,18 @@ function submitAbsenOnline(nama, nik, jenis, lat, lng, akurasi, fotoBase64) {
   const jamStr = Utilities.formatDate(now, tz, 'HH:mm');
   const tanggalStr = Utilities.formatDate(now, tz, 'dd/MM/yyyy');
 
-  // Simpan foto selfie ke Drive, folder per bulan. Kalau gagal upload,
-  // absen tetap tercatat (jangan sampai karyawan gagal absen gara-gara
-  // masalah jaringan/Drive), tapi FotoUrl dikosongkan.
-  let fotoUrl = '';
-  try {
-    const folder = getOrCreateFotoAbsenBulanFolder_(now.getFullYear(), now.getMonth() + 1);
-    const namaFile = nama.replace(/[^\w]+/g, '_') + '_' + jenis + '_' +
-      Utilities.formatDate(now, tz, 'yyyyMMdd_HHmmss') + '.jpg';
-    const rawBase64 = fotoBase64.replace(/^data:image\/\w+;base64,/, '');
-    const bytes = Utilities.base64Decode(rawBase64);
-    const blob = Utilities.newBlob(bytes, 'image/jpeg', namaFile);
-    const file = folder.createFile(blob);
-    fotoUrl = file.getUrl();
-  } catch (e) {
-    Logger.log('Gagal simpan foto absen untuk ' + nama + ': ' + e.message);
-  }
+  const fotoUrl = simpanFotoAbsen_(nama, jenis, fotoBase64, now, tz);
 
-  // Bila periode aktif BUKAN bulan berjalan (mis. tanggal 1 sebelum "Mulai Periode Baru"),
-  // absen tetap dicatat di LogAbsenOnline tetapi TIDAK ditulis ke Realisasi/JamScan/JamKerja:
-  // kolom tanggalnya milik bulan lalu. Admin memprosesnya setelah periode diganti.
   let periodeBelumDiganti = false;
   let namaPeriode = '';
 
-  const lock = LockService.getScriptLock();
-  lock.waitLock(15000);
-  try {
+  withScriptLock_(() => {
     getOrCreateLogAbsenOnlineSheet_().appendRow([
       now, tanggalStr, nama, nik, jenis, jamStr, lat, lng, jarak, status, fotoUrl
     ]);
 
+    // Periode aktif bukan bulan berjalan (mis. tanggal 1 sebelum "Mulai Periode Baru"):
+    // kolom tanggalnya milik bulan lalu, jadi Realisasi/JamScan/JamKerja tidak disentuh.
     const realisasiSheet = getSheet_(CONFIG.SHEET_REALISASI);
     const periodText = String(realisasiSheet.getRange(2, 1).getValue() || '').trim();
     const my = parsePeriodMonthYear_(periodText);
@@ -135,53 +232,59 @@ function submitAbsenOnline(nama, nik, jenis, lat, lng, akurasi, fotoBase64) {
 
     const lastRow = getLastEmployeeRow_(realisasiSheet);
     const numRows = lastRow - CONFIG.DATA_START_ROW + 1;
-    const names = realisasiSheet.getRange(CONFIG.DATA_START_ROW, 2, numRows, 1).getValues()
-      .map(r => String(r[0] || '').trim().toLowerCase());
+    const names = numRows > 0
+      ? realisasiSheet.getRange(CONFIG.DATA_START_ROW, 2, numRows, 1).getValues().map(r => String(r[0] || '').trim().toLowerCase())
+      : [];
     const rowIdx = periodeBelumDiganti ? -1 : names.indexOf(nama.toLowerCase());
 
     if (rowIdx !== -1) {
-      const dayCount = getDayColCount_(realisasiSheet);
-      const dayIdx = now.getDate() - 1;
-      if (dayIdx >= 0 && dayIdx < dayCount) {
-        const rowNum = CONFIG.DATA_START_ROW + rowIdx;
-        const col = CONFIG.FIRST_DAY_COL + dayIdx;
-        const currentVal = realisasiSheet.getRange(rowNum, col).getValue();
-        const currentCode = (currentVal === null || currentVal === undefined) ? '' : String(currentVal).trim().toUpperCase();
-        const isProtected = ['S', 'I', 'C', 'A'].includes(currentCode);
-        if (!isProtected && currentCode !== '1' && currentCode !== '2') {
-          realisasiSheet.getRange(rowNum, col).setValue(1);
-        }
-
-        let jamScanSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEET_JAMSCAN);
-        if (!jamScanSheet) jamScanSheet = getOrSyncJamScanSheet_();
-        const scanCell = jamScanSheet.getRange(rowNum, col);
-        const existing = splitScanPair_(scanCell.getValue());
-        const masuk = jenis === 'Masuk' ? jamStr : existing.masuk;
-        const keluar = jenis === 'Pulang' ? jamStr : existing.keluar;
-        scanCell.setValue(formatScanPair_(masuk, keluar));
-
-        // === TAMBAHAN: tulis jam kerja terhitung ke sheet JamKerja saat absen Pulang ===
-        if (jenis === 'Pulang' && masuk && keluar) {
-          const jamKerjaJam = hitungDurasiJamKerja_(masuk, keluar);
-          if (jamKerjaJam > 0) {
-            let jamKerjaSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEET_JAMKERJA);
-            if (!jamKerjaSheet) jamKerjaSheet = getOrSyncJamKerjaSheet_();
-            jamKerjaSheet.getRange(rowNum, col).setValue(Math.round(jamKerjaJam * 100) / 100);
-          }
-        }
-               // === AKHIR TAMBAHAN ===
-      }
+      tulisAbsenKeRekap_(realisasiSheet, CONFIG.DATA_START_ROW + rowIdx, now, jenis, jamStr);
     }
 
     SpreadsheetApp.flush();
-  } finally {
-    lock.releaseLock();
-  }
+  }, 15000);
 
   const hasil = { status: status, jam: jamStr, jarak: jarak };
   if (periodeBelumDiganti) { hasil.periodeBelumDiganti = true; hasil.periode = namaPeriode; }
   return hasil;
 }
+
+/** Tulis Realisasi (=1 bila masih kosong), JamScan, dan JamKerja (saat Pulang) untuk hari ini. Dipanggil di dalam lock. */
+function tulisAbsenKeRekap_(realisasiSheet, rowNum, now, jenis, jamStr) {
+  const dayCount = getDayColCount_(realisasiSheet);
+  const dayIdx = now.getDate() - 1;
+  if (dayIdx < 0 || dayIdx >= dayCount) return;
+
+  const col = CONFIG.FIRST_DAY_COL + dayIdx;
+  const currentVal = realisasiSheet.getRange(rowNum, col).getValue();
+  const currentCode = (currentVal === null || currentVal === undefined) ? '' : String(currentVal).trim().toUpperCase();
+  const isProtected = ['S', 'I', 'C', 'A'].includes(currentCode);
+  if (!isProtected && currentCode !== '1' && currentCode !== '2') {
+    realisasiSheet.getRange(rowNum, col).setValue(1);
+  }
+
+  const ss = getSpreadsheet_();
+  let jamScanSheet = ss.getSheetByName(CONFIG.SHEET_JAMSCAN);
+  if (!jamScanSheet) jamScanSheet = getOrSyncJamScanSheet_();
+  const scanCell = jamScanSheet.getRange(rowNum, col);
+  const existing = splitScanPair_(scanCell.getValue());
+  const masuk = jenis === 'Masuk' ? jamStr : existing.masuk;
+  const keluar = jenis === 'Pulang' ? jamStr : existing.keluar;
+  scanCell.setValue(formatScanPair_(masuk, keluar));
+
+  // Jam kerja terhitung ditulis ke JamKerja saat absen Pulang (bila Masuk-nya ada).
+  if (jenis === 'Pulang' && masuk && keluar) {
+    const jam = hitungDurasiJamKerja_(masuk, keluar);
+    if (jam > 0 && jam <= JAM_KERJA_MAKS_) {
+      let jamKerjaSheet = ss.getSheetByName(CONFIG.SHEET_JAMKERJA);
+      if (!jamKerjaSheet) jamKerjaSheet = getOrSyncJamKerjaSheet_();
+      jamKerjaSheet.getRange(rowNum, col).setValue(Math.round(jam * 100) / 100);
+    }
+  }
+}
+
+/* ============================ RIWAYAT ============================ */
+
 function getRiwayatAbsen(nik) {
   nik = String(nik || '').trim();
   if (!nik) throw new Error('NIK wajib diisi.');
@@ -204,73 +307,34 @@ function getRiwayatAbsen(nik) {
 function formatTanggalAbsen_(value) {
   if (value === null || value === undefined || value === '') return '-';
   if (value instanceof Date) {
-    const tz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
-    return Utilities.formatDate(value, tz, 'dd/MM/yyyy');
+    return Utilities.formatDate(value, getSpreadsheet_().getSpreadsheetTimeZone(), 'dd/MM/yyyy');
   }
   return String(value).trim();
 }
-/**
- * Cari karyawan by Nama (hanya) untuk autocomplete Absen Online.
- * Mengembalikan maksimal 10 hasil paling relevan.
- * Format tiap hasil: { nama, nik, label } dengan label = Nama saja
- */
-function searchKaryawanUntukAbsen(query) {
-  query = String(query || '').trim().toLowerCase();
-  if (!query) return [];
 
-  const sheet = getOrCreateNikSheet_();
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return [];
-
-  const data = sheet.getRange(2, 1, lastRow - 1, 2).getValues(); // kolom A=Nama, B=NIK
-  const results = [];
-
-  data.forEach(row => {
-    const nama = String(row[0] || '').trim();
-    const nik = String(row[1] || '').trim();
-    if (!nama) return;
-    const namaLower = nama.toLowerCase();
-
-    let score = -1;
-    if (namaLower === query) score = 100;
-    else if (namaLower.startsWith(query)) score = 80;
-    else if (namaLower.includes(query)) score = 50;
-
-    if (score > -1) results.push({ nama: nama, nik: nik, score: score });
-  });
-
-  results.sort((a, b) => b.score - a.score || a.nama.localeCompare(b.nama));
-  return results.slice(0, 10).map(r => ({ nama: r.nama, nik: r.nik, label: r.nama }));
-}
 function formatJam_(value) {
   if (value === null || value === undefined || value === '') return '-';
   if (value instanceof Date) {
-    const tz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
-    return Utilities.formatDate(value, tz, 'HH:mm');
+    return Utilities.formatDate(value, getSpreadsheet_().getSpreadsheetTimeZone(), 'HH:mm');
   }
   return String(value).trim();
 }
-const FOTO_ABSEN_ROOT_FOLDER_NAME_ = 'Foto Absen Online - AMS Housekeeping';
-const RETENSI_FOTO_ABSEN_BULAN_ = 3;
 
-function getOrCreateFotoAbsenRootFolder_() {
-  const it = DriveApp.getFoldersByName(FOTO_ABSEN_ROOT_FOLDER_NAME_);
-  if (it.hasNext()) return it.next();
-  return DriveApp.createFolder(FOTO_ABSEN_ROOT_FOLDER_NAME_);
+/* ============================ RETENSI FOTO ============================ */
+
+/** Penanda di LogAbsenOnline untuk foto yang sudah dihapus. */
+function labelFotoDihapus_() {
+  return '[Foto dihapus - retensi ' + RETENSI_FOTO_ABSEN_BULAN_ + ' bulan]';
 }
 
-function getOrCreateFotoAbsenBulanFolder_(tahun, bulan) {
-  const root = getOrCreateFotoAbsenRootFolder_();
-  const namaFolder = tahun + '-' + String(bulan).padStart(2, '0');
-  const it = root.getFoldersByName(namaFolder);
-  if (it.hasNext()) return it.next();
-  return root.createFolder(namaFolder);
+/** Awal bulan batas retensi: folder foto SEBELUM tanggal ini dibuang. Dihitung per bulan (tidak meluber di tanggal 29-31). */
+function batasAwalRetensiFoto_(now) {
+  return new Date(now.getFullYear(), now.getMonth() - RETENSI_FOTO_ABSEN_BULAN_, 1);
 }
+
 function hapusFotoAbsenLama_() {
   const root = getOrCreateFotoAbsenRootFolder_();
-  const batasWaktu = new Date();
-  batasWaktu.setMonth(batasWaktu.getMonth() - RETENSI_FOTO_ABSEN_BULAN_);
-  const batasAwalBulan = new Date(batasWaktu.getFullYear(), batasWaktu.getMonth(), 1);
+  const batasAwalBulan = batasAwalRetensiFoto_(new Date());
 
   const folders = root.getFolders();
   let totalDihapus = 0;
@@ -295,26 +359,28 @@ function hapusFotoAbsenLama_() {
   tandaiFotoTerhapusDiSheet_(batasAwalBulan);
 }
 
+/** Ganti FotoUrl baris log yang lebih lama dari batas dengan penanda. Hanya kolom FotoUrl yang ditulis. */
 function tandaiFotoTerhapusDiSheet_(batasWaktu) {
   const sheet = getOrCreateLogAbsenOnlineSheet_();
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
 
-  const data = sheet.getRange(2, 1, lastRow - 1, 11).getValues();
+  const data = sheet.getRange(2, 1, lastRow - 1, LOG_ABSEN_FOTO_COL_).getValues();
+  const label = labelFotoDihapus_();
+  const fotoCol = data.map(row => [row[LOG_ABSEN_FOTO_COL_ - 1]]);
   let changed = false;
 
   data.forEach((row, i) => {
     const timestamp = row[0];
-    const fotoUrl = row[10];
-    if (timestamp instanceof Date && timestamp < batasWaktu && fotoUrl &&
-        fotoUrl !== '[Foto dihapus - retensi 3 bulan]') {
-      data[i][10] = '[Foto dihapus - retensi 3 bulan]';
+    const fotoUrl = row[LOG_ABSEN_FOTO_COL_ - 1];
+    if (timestamp instanceof Date && timestamp < batasWaktu && fotoUrl && fotoUrl !== label) {
+      fotoCol[i][0] = label;
       changed = true;
     }
   });
 
   if (changed) {
-    sheet.getRange(2, 1, data.length, 11).setValues(data);
+    sheet.getRange(2, LOG_ABSEN_FOTO_COL_, fotoCol.length, 1).setValues(fotoCol);
     SpreadsheetApp.flush();
   }
 }
@@ -335,29 +401,22 @@ function setupTriggerHapusFotoAbsenLama() {
 
   Logger.log('Trigger hapus foto absen lama terpasang: tiap tanggal 1 jam 03:00.');
 }
-function testRiwayat() {
+
+/** Alat uji manual: tampilkan riwayat absen karyawan pertama di DataKaryawan (atau yang namanya mengandung `namaCari`). */
+function testRiwayat(namaCari) {
   const sheet = getOrCreateNikSheet_();
+  if (sheet.getLastRow() < 2) { Logger.log('DataKaryawan kosong.'); return; }
   const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
-  const nikNurul = data.find(r => String(r[0]).toLowerCase().includes('nurul'));
-  Logger.log('NIK ditemukan: ' + JSON.stringify(nikNurul));
-  
-  if (nikNurul) {
-    const hasil = getRiwayatAbsen(String(nikNurul[1]));
-    Logger.log('HASIL RIWAYAT: ' + JSON.stringify(hasil, null, 2));
+  const cari = String(namaCari || '').toLowerCase();
+  const baris = cari ? data.find(r => String(r[0]).toLowerCase().includes(cari)) : data[0];
+  Logger.log('NIK ditemukan: ' + JSON.stringify(baris));
+
+  if (baris) {
+    Logger.log('HASIL RIWAYAT: ' + JSON.stringify(getRiwayatAbsen(String(baris[1])), null, 2));
   }
 }
-function hitungDurasiJamKerja_(masukStr, keluarStr) {
-  const toMinutes = s => {
-    const parts = String(s).split(':');
-    const h = parseInt(parts[0], 10) || 0;
-    const m = parseInt(parts[1], 10) || 0;
-    return h * 60 + m;
-  };
-  let diff = toMinutes(keluarStr) - toMinutes(masukStr);
-  if (diff < 0) diff += 24 * 60; // jaga-jaga shift malam lewat tengah malam
-  return diff / 60;
-}
-const FOTO_PROFIL_ROOT_FOLDER_NAME_ = 'Foto Profil Karyawan - AMS Housekeeping';
+
+/* ============================ FOTO PROFIL ============================ */
 
 function getOrCreateFotoProfilFolder_() {
   const it = DriveApp.getFoldersByName(FOTO_PROFIL_ROOT_FOLDER_NAME_);
@@ -373,30 +432,30 @@ function setFotoProfilKaryawan(nama, nik, fotoBase64) {
 
   verifyKaryawanByNamaNik_(nama, nik);
 
-  const folder = getOrCreateFotoProfilFolder_();
   const namaFile = nama.replace(/[^\w]+/g, '_') + '_profil_' +
     Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'GMT+7', 'yyyyMMdd_HHmmss') + '.jpg';
-  const rawBase64 = fotoBase64.replace(/^data:image\/\w+;base64,/, '');
-  const bytes = Utilities.base64Decode(rawBase64);
-  const blob = Utilities.newBlob(bytes, 'image/jpeg', namaFile);
+  const blob = decodeFotoBase64_(fotoBase64, namaFile);   // ukuran diperiksa sebelum ada file dibuat
+
+  const folder = getOrCreateFotoProfilFolder_();
   const file = folder.createFile(blob);
-  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  try {
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  } catch (e) {
+    // Domain Workspace yang melarang sharing publik: foto tetap tersimpan, hanya mungkin tidak tampil bagi yang tak punya akses.
+    Logger.log('Gagal set sharing foto profil: ' + e.message);
+  }
   const fotoUrl = 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w400';
 
-  const lock = LockService.getScriptLock();
-  lock.waitLock(15000);
-  try {
+  withScriptLock_(() => {
     const sheet = getOrCreateNikSheet_();
     const lastRow = sheet.getLastRow();
-    const names = sheet.getRange(2, 1, lastRow - 1, 1).getValues()
+    const names = lastRow < 2 ? [] : sheet.getRange(2, 1, lastRow - 1, 1).getValues()
       .map(r => String(r[0] || '').trim().toLowerCase());
     const idx = names.indexOf(nama.toLowerCase());
     if (idx === -1) throw new Error('Karyawan tidak ditemukan di DataKaryawan.');
-    sheet.getRange(idx + 2, 10).setValue(fotoUrl); // kolom J = FotoProfil
+    sheet.getRange(idx + 2, EMP_COL.FOTO_PROFIL).setValue(fotoUrl);
     SpreadsheetApp.flush();
-  } finally {
-    lock.releaseLock();
-  }
+  }, 15000);
 
   return { fotoProfilUrl: fotoUrl };
 }
