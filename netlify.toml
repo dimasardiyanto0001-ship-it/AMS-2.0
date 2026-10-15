@@ -1,0 +1,37 @@
+# Netlify hanya mempublikasikan folder public/ (hasil build.js).
+# File .gs, MIGRASI.md, dan sumber .html TIDAK ikut terbit.
+[build]
+  command = "node build.js"
+  publish = "public"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# Branch selain production (mis. "testing") dan Deploy Preview memakai sheet SALINAN.
+[context.branch-deploy.environment]
+  AMS_TARGET = "test"
+
+[context.deploy-preview.environment]
+  AMS_TARGET = "test"
+
+[[redirects]]
+  from = "/absensi"
+  to = "/absensi-online.html"
+  status = 200
+
+[[redirects]]
+  from = "/AbsensiOnline.html"
+  to = "/absensi-online.html"
+  status = 301
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-Frame-Options = "DENY"
+
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "no-cache"
