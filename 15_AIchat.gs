@@ -83,7 +83,7 @@ function callGeminiAI_(promptText, systemInstruction) {
     throw new Error('Balasan AI bukan JSON yang valid. Coba ulangi pertanyaan dengan kalimat lain.');
   }
 }
-/** Ringkasan data periode aktif yang dikirim ke AI sebagai konteks (bukan seluruh raw sheet). */
+/** Ringkasan data periode aktif beserta rincian harian yang dikirim ke AI sebagai konteks. */
 function buildAIDataContext_() {
   const data = getAllDataInternal_();
   return {
@@ -91,14 +91,23 @@ function buildAIDataContext_() {
     dayCount: data.dayCount,
     dashboard: data.dashboard,
     rekap: (data.rekap || []).map(r => ({
-      nama: r.nama, jabatan: r.jabatan, hadir: r.hadir, alfa: r.alfa,
-      izin: r.izin, sakit: r.sakit, cuti: r.cuti, off: r.off,
-      persenKehadiran: r.persenKehadiran, totalJamKerja: r.totalJamKerja,
-      kekuranganJam: r.kekuranganJam
+      nama: r.nama,
+      jabatan: r.jabatan,
+      hadir: r.hadir,
+      alfa: r.alfa,
+      izin: r.izin,
+      sakit: r.sakit,
+      cuti: r.cuti,
+      off: r.off,
+      persenKehadiran: r.persenKehadiran,
+      totalJamKerja: r.totalJamKerja,
+      kekuranganJam: r.kekuranganJam,
+      // TAMBAHKAN DATA HARIAN (Sesuai properti data harian dari getAllDataInternal_):
+      // misal: r.harian, r.dailyLogs, atau r.logHarian
+      absensiHarian: r.harian || r.dailyLogs || [] 
     }))
   };
 }
-
 /** Bulatkan & jepit nomor tanggal ke 1..dayCount; nilai tak terbaca -> fallback. */
 function clampDayNumber_(value, fallback, dayCount) {
   const n = parseInt(value, 10);
