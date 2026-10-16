@@ -83,6 +83,13 @@ const ROUTES = {
   setJamKerjaSettings: { fn: 'setJamKerjaSettings', args: ['settings', 'token'] },
   addShiftJamKerja: { fn: 'addShiftJamKerja', args: ['kodeShift', 'label', 'jamMasuk', 'jamPulang', 'targetJam', 'token'] },
 
+  /* ---- POLA SHIFT (Setting Jadwal Kerja) ---- */
+  getPolaShiftList: { fn: 'getPolaShiftList', args: ['token'] },
+  addPolaShift: { fn: 'addPolaShift', args: ['namaPola', 'urutanKode', 'deskripsi', 'token'] },
+  deletePolaShift: { fn: 'deletePolaShift', args: ['namaPola', 'token'] },
+  assignPolaKaryawan: { fn: 'assignPolaKaryawan', args: ['nama', 'polaAssigned', 'offsetHari', 'token'] },
+  generateJadwalDariPola: { fn: 'generateJadwalDariPola', args: ['mode', 'token'] },
+
   /* ---- LAPORAN & EXPORT ---- */
   generateAttendanceLogExcel: { fn: 'generateAttendanceLogExcel', args: ['periodKey', 'employeeName', 'dayStart', 'dayEnd', 'token'] },
   exportPdf: { fn: 'exportSheetPdf', args: ['sheetName', 'token', 'department'] },

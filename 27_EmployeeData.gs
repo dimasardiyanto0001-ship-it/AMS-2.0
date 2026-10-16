@@ -12,9 +12,10 @@ const STATUS_AKTIF_TERJADWAL = 'Aktif Terjadwal';
 
 const EMP_COL = {
   NAMA: 1, NIK: 2, DEPARTMENT: 3, EMAIL: 4, STATUS_KARYAWAN: 5,
-  TGL_REGISTRASI: 6, JABATAN: 7, STATUS_ASSIGNMENT: 8, NO_HP: 9, FOTO_PROFIL: 10
+  TGL_REGISTRASI: 6, JABATAN: 7, STATUS_ASSIGNMENT: 8, NO_HP: 9, FOTO_PROFIL: 10,
+  POLA_ASSIGNED: 11, OFFSET_HARI: 12   // pola rotasi shift (18_PolaJadwalGenerator.gs)
 };
-const EMP_HEADERS_ = ['Nama', 'NIK', 'Department', 'Email', 'Status Karyawan', 'Tanggal Registrasi', 'Jabatan', 'Status Assignment', 'No HP', 'FotoProfil'];
+const EMP_HEADERS_ = ['Nama', 'NIK', 'Department', 'Email', 'Status Karyawan', 'Tanggal Registrasi', 'Jabatan', 'Status Assignment', 'No HP', 'FotoProfil', 'PolaAssigned', 'OffsetHari'];
 const EMP_NUM_COLS_ = EMP_HEADERS_.length;
 
 /** Field yang boleh diubah lewat setEmployeeMasterData -> nomor kolom. */
@@ -123,7 +124,9 @@ function getDaftarKaryawanInternal_() {
         tanggalRegistrasi: tglRegistrasi,
         statusAssignment: String(r[EMP_COL.STATUS_ASSIGNMENT - 1] || '') || STATUS_BELUM_TERJADWAL,
         noHp: String(r[EMP_COL.NO_HP - 1] || ''),
-        fotoProfilUrl: String(r[EMP_COL.FOTO_PROFIL - 1] || '')
+        fotoProfilUrl: String(r[EMP_COL.FOTO_PROFIL - 1] || ''),
+        polaAssigned: cellText_(r[EMP_COL.POLA_ASSIGNED - 1]),
+        offsetHari: parseInt(r[EMP_COL.OFFSET_HARI - 1], 10) || 0
       };
     });
 }
