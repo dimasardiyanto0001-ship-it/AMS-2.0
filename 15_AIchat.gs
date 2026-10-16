@@ -83,29 +83,35 @@ function callGeminiAI_(promptText, systemInstruction) {
     throw new Error('Balasan AI bukan JSON yang valid. Coba ulangi pertanyaan dengan kalimat lain.');
   }
 }
-/** Ringkasan data periode aktif beserta data harian yang dikirim ke AI sebagai konteks. */
+/** Ringkasan data + rincian matriks harian yang dikirim ke AI sebagai konteks. */
 function buildAIDataContext_() {
   const data = getAllDataInternal_();
+  
   return {
     period: data.period,
     dayCount: data.dayCount,
     dashboard: data.dashboard,
-    rekap: (data.rekap || []).map(r => ({
-      nama: r.nama,
-      jabatan: r.jabatan,
-      hadir: r.hadir,
-      alfa: r.alfa,
-      izin: r.izin,
-      sakit: r.sakit,
-      cuti: r.cuti,
-      off: r.off,
-      persenKehadiran: r.persenKehadiran,
-      totalJamKerja: r.totalJamKerja,
-      kekuranganJam: r.kekuranganJam,
-      // TAMBAHKAN ATAU SERTAKAN ARRAY LOG HARIAN:
-      // Sesuaikan 'harian' / 'matrix' / 'daily' dengan properti yang ada di objek 'r' atau 'data'
-      harian: r.harian || r.matrix || r.daily || [] 
-    }))
+    rekap: (data.rekap || []).map(r => {
+      // Ambil data status harian per tanggal dari objek r (misal r.harian, r.statusHarian, atau r.matrix)
+      // Jika bentuknya objek/array tanggal {1: "1", 2: "1", 3: "OFF", ...}
+      const logHarian = r.harian || r.statusHarian || r.matrix || r.daily || {};
+
+      return {
+        nama: r.nama,
+        jabatan: r.jabatan,
+        hadir: r.hadir,
+        alfa: r.alfa,
+        izin: r.izin,
+        sakit: r.sakit,
+        cuti: r.cuti,
+        off: r.off,
+        persenKehadiran: r.persenKehadiran,
+        totalJamKerja: r.totalJamKerja,
+        kekuranganJam: r.kekuranganJam,
+        // SERTAKAN DATA HARIAN KE DALAM KONTEKS GEMINI:
+        harian: logHarian
+      };
+    })
   };
 }
 /** Bulatkan & jepit nomor tanggal ke 1..dayCount; nilai tak terbaca -> fallback. */
@@ -134,15 +140,21 @@ function chatWithAI(pesan, token) {
   const context = buildAIDataContext_();
 
  const systemInstruction =
-    'Anda asisten AI untuk sistem absensi karyawan. JAWAB HANYA berdasarkan data konteks JSON yang diberikan, ' +
-    'termasuk data rekapitulasi maupun rincian data harian per tanggal. ' +
-    'Jika user menanyakan tanggal tertentu (misal tanggal 10 atau rentang minggu), periksa array harian tiap karyawan. ' +
-    'Jangan mengarang angka/data yang tidak ada di konteks. Balas SELALU dalam JSON valid dengan struktur persis: ' +
+    'Anda asisten AI untuk sistem absensi karyawan AMS. JAWAB HANYA berdasarkan data konteks JSON yang diberikan.\n' +
+    'Di dalam data rekap terdapat properti "harian" yang berisi status absensi per tanggal (misal tanggal 1, 2, 3, dst).\n' +
+    'Arti kode status harian:\n' +
+    '- "1": Hadir\n' +
+    '- "2": Lembur (Gantiin Shift)\n' +
+    '- "A": Alfa / Tidak Masuk Tanpa Keterangan\n' +
+    '- "OFF": Libur\n' +
+    '- "I": Izin\n' +
+    '- "S": Sakit\n' +
+    '- "C": Cuti\n' +
+    '- "R": Resign\n\n' +
+    'Jika user bertanya siapa yang tidak masuk/alfa/libur pada tanggal tertentu (misal tanggal 11), periksa status pada tanggal tersebut di objek "harian" untuk tiap karyawan.\n' +
+    'Balas SELALU dalam JSON valid dengan struktur persis:\n' +
     '{"action":"jawab","teks":"..."} ATAU ' +
-    '{"action":"kirim_email","teks":"ringkasan singkat permintaan","tglMulai":angka,"tglAkhir":angka,"tujuanEmail":"string atau null"}. ' +
-    'Gunakan action "kirim_email" HANYA jika user secara eksplisit minta data dikirim/di-email. ' +
-    'Kalau user tidak sebutkan tanggal, tglMulai=1 dan tglAkhir=dayCount. ' +
-    'Kalau user tidak sebutkan alamat email, isi tujuanEmail dengan null.';
+    '{"action":"kirim_email","teks":"...","tglMulai":angka,"tglAkhir":angka,"tujuanEmail":"string atau null"}.';
 
   const prompt = 'Data konteks (JSON):\n' + JSON.stringify(context) + '\n\nPermintaan user: ' + message;
 
