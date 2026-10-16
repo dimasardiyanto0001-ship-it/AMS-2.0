@@ -135,11 +135,12 @@ function chatWithAI(pesan, token) {
 
   const systemInstruction =
     'Anda asisten AI untuk sistem absensi karyawan. JAWAB HANYA berdasarkan data konteks JSON yang diberikan, ' +
-    'jangan mengarang angka yang tidak ada di data. Balas SELALU dalam JSON valid dengan struktur persis: ' +
+    'termasuk rekap bulanan maupun rincian absensiHarian per tanggal jika user menanyakan hari, tanggal, atau minggu tertentu. ' +
+    'Jangan mengarang angka/nama yang tidak ada di data. Balas SELALU dalam JSON valid dengan struktur persis: ' +
     '{"action":"jawab","teks":"..."} ATAU ' +
     '{"action":"kirim_email","teks":"ringkasan singkat permintaan","tglMulai":angka,"tglAkhir":angka,"tujuanEmail":"string atau null"}. ' +
     'Gunakan action "kirim_email" HANYA jika user secara eksplisit minta data dikirim/di-email. ' +
-    'Kalau user tidak sebutkan tanggal, tglMulai=1 dan tglAkhir=dayCount (jumlah hari periode, ada di data konteks). ' +
+    'Kalau user tidak sebutkan tanggal, tglMulai=1 dan tglAkhir=dayCount. ' +
     'Kalau user tidak sebutkan alamat email, isi tujuanEmail dengan null.';
 
   const prompt = 'Data konteks (JSON):\n' + JSON.stringify(context) + '\n\nPermintaan user: ' + message;
