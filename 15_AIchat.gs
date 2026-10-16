@@ -83,7 +83,7 @@ function callGeminiAI_(promptText, systemInstruction) {
     throw new Error('Balasan AI bukan JSON yang valid. Coba ulangi pertanyaan dengan kalimat lain.');
   }
 }
-/** Ringkasan data periode aktif beserta rincian harian yang dikirim ke AI sebagai konteks. */
+/** Ringkasan data periode aktif beserta data harian yang dikirim ke AI sebagai konteks. */
 function buildAIDataContext_() {
   const data = getAllDataInternal_();
   return {
@@ -102,9 +102,9 @@ function buildAIDataContext_() {
       persenKehadiran: r.persenKehadiran,
       totalJamKerja: r.totalJamKerja,
       kekuranganJam: r.kekuranganJam,
-      // TAMBAHKAN DATA HARIAN (Sesuai properti data harian dari getAllDataInternal_):
-      // misal: r.harian, r.dailyLogs, atau r.logHarian
-      absensiHarian: r.harian || r.dailyLogs || [] 
+      // TAMBAHKAN ATAU SERTAKAN ARRAY LOG HARIAN:
+      // Sesuaikan 'harian' / 'matrix' / 'daily' dengan properti yang ada di objek 'r' atau 'data'
+      harian: r.harian || r.matrix || r.daily || [] 
     }))
   };
 }
