@@ -177,13 +177,19 @@ function submitAbsenOnlineReliever(namaReliever, asalPerusahaan, namaDigantikan,
   lat = Number(lat); lng = Number(lng);
 
   if (!namaReliever) throw new Error('Nama reliever wajib diisi.');
+  if (!asalPerusahaan) throw new Error('Asal perusahaan wajib diisi.');
+  if (namaReliever.length > 80 || asalPerusahaan.length > 80) throw new Error('Nama atau perusahaan terlalu panjang.');
   if (!namaDigantikan) throw new Error('Wajib pilih karyawan yang digantikan.');
   if (jenis !== 'Masuk' && jenis !== 'Pulang') throw new Error('Jenis absen tidak valid.');
   if (isNaN(lat) || isNaN(lng)) throw new Error('Data lokasi GPS tidak valid.');
   if (!fotoBase64) throw new Error('Foto selfie wajib diambil sebelum absen.');
 
-  const reliver = verifyReliverByNama_(namaReliever);
-  if (!asalPerusahaan) asalPerusahaan = reliver.perusahaan;
+  // Tidak lagi dicek ke sheet DataReliever: reliever mengetik nama & perusahaan sendiri.
+  // Pengaman: karyawan yang digantikan harus benar-benar A/I/S hari ini.
+  const daftarHariIni = getKaryawanAbsenHariIni().map(k => k.nama.toLowerCase());
+  if (daftarHariIni.indexOf(namaDigantikan.toLowerCase()) === -1) {
+    throw new Error('Karyawan yang digantikan tidak berstatus Alfa/Izin/Sakit hari ini.');
+  }
 
   const lokasi = getSettingLokasiAbsen_();
   const jarak = haversineDistanceMeter_(lat, lng, lokasi.lat, lokasi.lng);
