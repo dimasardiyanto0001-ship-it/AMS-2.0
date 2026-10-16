@@ -133,11 +133,22 @@ function getSetting_(key, fallback) {
   return (v !== null && v !== '') ? v : (fallback === undefined ? '' : fallback);
 }
 
-/** Salt hash lama. Hanya dipakai untuk migrasi akun yang belum punya salt per-user. */
+/**
+ * Salt hash lama (SHA-256 + salt global) untuk akun yang BELUM punya salt per-user. Nilainya dibaca
+ * HANYA dari Script Properties (LEGACY_PASSWORD_SALT) dan tidak punya nilai bawaan di kode, karena
+ * kode ini bisa berada di repositori publik. Akun yang sudah punya salt per-user tidak memakainya.
+ */
 function getLegacyPasswordSalt_() {
-  return getSetting_('LEGACY_PASSWORD_SALT', 'servanda-ventura-2026');
+  const salt = getSetting_('LEGACY_PASSWORD_SALT', '');
+  if (!salt) {
+    throw new Error('Akun ini masih memakai hash lama dan LEGACY_PASSWORD_SALT belum diisi di Script Properties. Hubungi admin.');
+  }
+  return salt;
 }
 
+/** Penerima laporan bulanan. Dibaca HANYA dari Script Properties (REPORT_EMAIL). */
 function getReportEmail_() {
-  return getSetting_('REPORT_EMAIL', 'dimas.ardiyanto@wisma46.com');
+  const email = getSetting_('REPORT_EMAIL', '');
+  if (!email) throw new Error('REPORT_EMAIL belum diisi di Script Properties.');
+  return email;
 }
