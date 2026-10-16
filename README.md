@@ -257,3 +257,25 @@ Tes dilakukan dengan mock Apps Script di Node: kode lama (Fase 8) dibandingkan d
 ## Sisa modul satelit
 
 `18_PolaJadwalGenerator.gs` (11 fungsi) dan `24_BackupReliever.gs` (15 fungsi).
+
+# Menghapus rahasia dari kode (repositori publik)
+
+Yang berubah: `00_Config.gs` (salt hash lama dan email penerima laporan tidak lagi tertulis di kode, hanya dibaca dari
+Script Properties) dan file baru `98_SecurityCheck.gs` (alat diagnosis yang tidak menampilkan nilai rahasia).
+
+## Urutan pemasangan (urutan PENTING, jangan dibalik)
+
+1. Apps Script produksi > Project Settings > **Script Properties** > tambahkan:
+   - `LEGACY_PASSWORD_SALT` = nilai salt lama (yang sekarang terlihat di `00_Config.gs` publik)
+   - `REPORT_EMAIL` = alamat penerima laporan bulanan
+   - `GEMINI_API_KEY` bila chatbot dipakai (sudah tidak ada di kode)
+2. Tambahkan file `98_SecurityCheck.gs`, lalu jalankan `periksaRahasiaScriptProperties()`. Log harus menunjukkan semua yang Anda pakai "terisi".
+3. Ganti isi `00_Config.gs` dengan versi baru. Jalankan `auditRoutes()` (harus bersih). Uji login satu akun lama dan satu akun baru.
+4. Jalankan `periksaAkunBelumTermigrasi()`. Daftar itu = akun yang masih memakai hash lama; mereka otomatis pindah ke hash per-user
+   saat login berikutnya. Akun yang tidak akan login lagi: reset password lewat Setting > Account.
+5. Setelah daftar kosong, ganti nilai `LEGACY_PASSWORD_SALT` dengan teks acak panjang. Salt lama yang sempat publik jadi tidak berguna.
+
+## Satu langkah lagi di GitHub
+
+Ubah repositori jadi **Private** (Settings > General > Danger Zone > Change visibility). Riwayat commit lama tetap memuat
+nilai lama selama repositori publik; langkah 5 menetralkannya. Netlify tetap bisa membangun dari repositori private lewat integrasi GitHub-nya.
