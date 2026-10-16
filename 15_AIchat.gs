@@ -24,31 +24,54 @@ function stripCodeFence_(text) {
   return m ? m[1] : String(text).trim();
 }
 
-/** Panggil Gemini API. systemInstruction = peran AI, promptText = pesan + konteks data. @return {Object} JSON balasan */
+/** Panggil Gemini API dengan retry mechanism ( Exponential Backoff ). */
 function callGeminiAI_(promptText, systemInstruction) {
   const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
   if (!apiKey) throw new Error('GEMINI_API_KEY belum diset di Script Properties.');
 
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + getAiModel_() + ':generateContent';
+  const modelName = getAiModel_() || 'gemini-1.5-flash'; 
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + modelName + ':generateContent';
+  
   const payload = {
     system_instruction: { parts: [{ text: systemInstruction }] },
     contents: [{ role: 'user', parts: [{ text: promptText }] }],
     generationConfig: { responseMimeType: 'application/json' }
   };
 
-  const res = UrlFetchApp.fetch(url, {
+  const options = {
     method: 'post',
     contentType: 'application/json',
     headers: { 'x-goog-api-key': apiKey },
     payload: JSON.stringify(payload),
     muteHttpExceptions: true
-  });
+  };
 
-  if (res.getResponseCode() !== 200) {
-    throw new Error('Gagal memanggil AI (' + res.getResponseCode() + '): ' + res.getContentText().substring(0, 300));
+  const maxRetries = 3;
+  let response;
+  let statusCode = 0;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    response = UrlFetchApp.fetch(url, options);
+    statusCode = response.getResponseCode();
+
+    // Jika sukses (200), keluar dari loop retry
+    if (statusCode === 200) {
+      break;
+    } 
+    
+    // Jika server sibuk (503) atau Rate Limit (429), tunggu sebentar lalu coba lagi
+    if (statusCode === 503 || statusCode === 429) {
+      if (attempt < maxRetries - 1) {
+        Utilities.sleep(Math.pow(2, attempt) * 1000); // Tunggu 1 detik, lalu 2 detik
+        continue;
+      }
+    }
+
+    // Jika error lain atau batas retry habis
+    throw new Error('Gagal memanggil AI (' + statusCode + '): ' + response.getContentText().substring(0, 300));
   }
 
-  const json = JSON.parse(res.getContentText());
+  const json = JSON.parse(response.getContentText());
   const part = json.candidates && json.candidates[0] && json.candidates[0].content &&
     json.candidates[0].content.parts && json.candidates[0].content.parts[0];
   const text = part && part.text;
@@ -60,7 +83,6 @@ function callGeminiAI_(promptText, systemInstruction) {
     throw new Error('Balasan AI bukan JSON yang valid. Coba ulangi pertanyaan dengan kalimat lain.');
   }
 }
-
 /** Ringkasan data periode aktif yang dikirim ke AI sebagai konteks (bukan seluruh raw sheet). */
 function buildAIDataContext_() {
   const data = getAllDataInternal_();
