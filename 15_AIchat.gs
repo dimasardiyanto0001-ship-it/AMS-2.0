@@ -10,7 +10,7 @@
  * Script Properties: GEMINI_API_KEY (wajib), AI_MODEL (opsional).
  *****************************************************************/
 
-const AI_MODEL_DEFAULT_ = 'gemini-3.5-flash';
+const AI_MODEL_DEFAULT_ = 'gemini-1.5-flash';
 const AI_MAX_MESSAGE_LENGTH_ = 1000;
 const AI_EMAIL_RE_ = /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/;
 
