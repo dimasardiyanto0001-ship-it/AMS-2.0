@@ -2,9 +2,10 @@
   DashboardRange.html
   Filter rentang tanggal + card "Jumlah Reliever" untuk tab Dashboard AMS.
 
-  PASANG: di index.html, tepat SETELAH baris  <?!= include('JavaScript'); ?>
-  tambahkan:
-      <?!= include('DashboardRange'); ?>
+  PASANG: di index.html, tepat SETELAH baris include JavaScript,
+  tambahkan satu baris include untuk DashboardRange (format tag sama
+  seperti include JavaScript). Jangan menulis tag include di komentar
+  file ini karena akan dibaca build.js sebagai include sungguhan.
   (kalau build Netlify memakai daftar file eksplisit di build.config.json,
    tambahkan juga "DashboardRange.html" di sana).
 
