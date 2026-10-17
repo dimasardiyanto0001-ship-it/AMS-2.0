@@ -47,7 +47,6 @@ function syncAuxGridSheet_(sheetName) {
   let sheet = ss.getSheetByName(sheetName);
   const isNew = !sheet;
   if (isNew) sheet = ss.insertSheet(sheetName);
-
   const oldValuesByName = isNew ? {} : readAuxValuesByName_(sheet);
 
   sheet.clear();
@@ -87,7 +86,6 @@ function formatScanPair_(scanMasuk, scanPulang) {
 function computeTargetJamKerjaByName_(jadwalGrid) {
   const targetByName = {};
   if (!jadwalGrid) return targetByName;
-
   const shiftMap = getShiftCodesDynamic_();
   jadwalGrid.employees.forEach(e => {
     let target = 0;
@@ -108,16 +106,20 @@ function attachNikToRekap_(rekap) {
   });
 }
 
-/** Tambah totalJamKerja, totalHariKerja, targetJamKerja, kekuranganJam ke tiap baris rekap. */
-function attachJamKerjaToRekap_(rekapArray, jadwalGrid, jamKerjaSheetOverride) {
+/**
+ * Tambah totalJamKerja, totalHariKerja, targetJamKerja, kekuranganJam ke tiap baris rekap.
+ * @param range opsional {from,to}: hanya hari ke-from..to yang dijumlah untuk jam aktual.
+ *              (jadwalGrid untuk target harus SUDAH dipotong ke rentang yang sama oleh pemanggil.)
+ */
+function attachJamKerjaToRekap_(rekapArray, jadwalGrid, jamKerjaSheetOverride, range) {
   const jamKerjaSheet = jamKerjaSheetOverride || getSpreadsheet_().getSheetByName(CONFIG.SHEET_JAMKERJA);
   const targetByName = computeTargetJamKerjaByName_(jadwalGrid);
-
   const actualByName = {};
   if (jamKerjaSheet) {
     readGridFromSheetObj_(jamKerjaSheet).employees.forEach(e => {
       let totalJam = 0, totalHari = 0;
-      e.days.forEach(v => {
+      const days = range ? e.days.slice(range.from - 1, range.to) : e.days;
+      days.forEach(v => {
         const num = Number(v);
         if (v !== '' && v !== null && !isNaN(num)) {
           totalJam += num;
@@ -127,12 +129,10 @@ function attachJamKerjaToRekap_(rekapArray, jadwalGrid, jamKerjaSheetOverride) {
       actualByName[nameKey_(e.nama)] = { totalJamKerja: round2_(totalJam), totalHariKerja: totalHari };
     });
   }
-
   return rekapArray.map(r => {
     const key = nameKey_(r.nama || '');
     const actual = actualByName[key] || { totalJamKerja: 0, totalHariKerja: 0 };
     const target = targetByName.hasOwnProperty(key) ? targetByName[key] : 0;
-
     return Object.assign({}, r, actual, {
       targetJamKerja: round2_(target),
       kekuranganJam: round2_(target - actual.totalJamKerja)
@@ -146,7 +146,6 @@ function computeJamKerjaRingkasan_(rekapArray) {
     totalJamKerja += Number(r.totalJamKerja) || 0;
     totalTargetJam += Number(r.targetJamKerja) || 0;
   });
-
   return {
     totalJamKerja: round2_(totalJamKerja),
     totalTargetJam: round2_(totalTargetJam),
