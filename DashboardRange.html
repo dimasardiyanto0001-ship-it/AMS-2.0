@@ -1,0 +1,310 @@
+<!--
+  DashboardRange.html
+  Filter rentang tanggal + card "Jumlah Reliever" untuk tab Dashboard AMS.
+
+  PASANG: di index.html, tepat SETELAH baris  <?!= include('JavaScript'); ?>
+  tambahkan:
+      <?!= include('DashboardRange'); ?>
+  (kalau build Netlify memakai daftar file eksplisit di build.config.json,
+   tambahkan juga "DashboardRange.html" di sana).
+
+  Cara kerja:
+  - Menyisipkan bar filter di atas #cards (tidak perlu mengubah markup index.html).
+  - Menyisipkan dayFrom/dayTo ke request getAllData (POST body atau GET ?action=data)
+    dengan membungkus window.fetch, jadi pemanggil getAllData di JavaScript.html tidak diubah.
+  - Membaca rangeInfo + reliever dari respons, lalu menambahkan card di #cards.
+  - Memuat ulang data lewat tombol #refreshBtn yang sudah ada.
+-->
+<style>
+  .dash-range-bar {
+    display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end;
+    background: #f8fafc; border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px 16px; margin-bottom: 14px;
+  }
+  .dash-range-bar,
+  .dash-range-bar label,
+  .dash-range-bar input,
+  .dash-range-bar button,
+  .dash-range-info { font-family: inherit; }
+  .dash-range-bar button { font-size: 13px; padding: 8px 14px; }
+  .dash-range-bar .filter-group { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .dash-range-bar input[type="date"] {
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px;
+    font-size: 13px; background: #fff; color: var(--text);
+  }
+  .dash-range-bar input[type="date"]:focus { outline: 2px solid var(--primary); }
+  .dash-range-bar input:disabled, .dash-range-bar button:disabled { opacity: .5; cursor: not-allowed; }
+  .dash-range-info { font-size: 12px; color: var(--muted); flex: 1 1 220px; align-self: center; }
+  .dash-range-info.active { color: var(--primary-dark); font-weight: 600; }
+  .dash-range-info.error { color: #dc2626; font-weight: 600; }
+  #cardReliever { cursor: help; }
+  @media (max-width: 768px) {
+    .dash-range-bar { flex-direction: column; align-items: stretch; }
+    .dash-range-bar .filter-group { width: 100%; }
+    .dash-range-bar input[type="date"] { width: 100%; }
+  }
+</style>
+
+<script>
+(function () {
+  'use strict';
+
+  var BULAN = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+  var CARD_ID = 'cardReliever';
+  var state = { from: '', to: '' };   // 'YYYY-MM-DD' atau ''
+  var lastInfo = null;                // rangeInfo dari server
+  var lastReliever = null;            // reliever dari server
+
+  function $(id) { return document.getElementById(id); }
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function iso(year, monthIndex, day) { return year + '-' + pad(monthIndex + 1) + '-' + pad(day); }
+
+  /** Nomor hari (1..31) bila tanggal ISO berada di bulan periode; selain itu null. */
+  function dayOf(isoStr, info) {
+    var p = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoStr || '');
+    if (!p) return null;
+    if (info && info.year != null) {
+      if (+p[1] !== info.year || (+p[2] - 1) !== info.monthIndex) return null;
+    }
+    return +p[3];
+  }
+
+  function archiveActive() {
+    var s = $('periodSelector');
+    return !!(s && s.value && s.value !== 'active');
+  }
+
+  /** Rentang hari yang akan dikirim ke server, atau null (= seluruh periode). */
+  function currentDays() {
+    if (archiveActive() || !state.from || !state.to) return null;
+    var f = dayOf(state.from, lastInfo), t = dayOf(state.to, lastInfo);
+    if (f == null || t == null) return null;
+    return { from: Math.min(f, t), to: Math.max(f, t) };
+  }
+
+  function monthLabel(info) {
+    return (info && info.year != null) ? (BULAN[info.monthIndex] + ' ' + info.year) : 'periode aktif';
+  }
+
+  function rangeLabel(info) {
+    if (!info) return '';
+    if (!info.active) return 'seluruh periode';
+    var lbl = (info.dayFrom === info.dayTo) ? ('tgl ' + info.dayFrom) : ('tgl ' + info.dayFrom + '–' + info.dayTo);
+    return lbl + ' ' + monthLabel(info);
+  }
+
+  /* ----------------------------- BAR FILTER ----------------------------- */
+
+  function setInfo(text, cls) {
+    var el = $('dashRangeInfo');
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'dash-range-info' + (cls ? ' ' + cls : '');
+  }
+
+  function reload() {
+    var btn = $('refreshBtn');
+    if (btn) btn.click();
+  }
+
+  function applyRange() {
+    var f = $('dashFrom').value, t = $('dashTo').value;
+    if (!f && !t) { resetRange(); return; }
+    if (!f) f = t;
+    if (!t) t = f;                       // satu tanggal saja = 1 hari
+    if (f > t) { var x = f; f = t; t = x; }
+    if (dayOf(f, lastInfo) == null || dayOf(t, lastInfo) == null) {
+      setInfo('Tanggal harus berada di dalam periode aktif (' + monthLabel(lastInfo) + ').', 'error');
+      return;
+    }
+    state.from = f; state.to = t;
+    $('dashFrom').value = f; $('dashTo').value = t;
+    setInfo('Memuat data…');
+    reload();
+  }
+
+  function resetRange() {
+    state.from = ''; state.to = '';
+    $('dashFrom').value = ''; $('dashTo').value = '';
+    setInfo('Memuat data…');
+    reload();
+  }
+
+  function syncBar() {
+    var from = $('dashFrom'), to = $('dashTo');
+    if (!from || !to) return;
+
+    var arsip = archiveActive();
+    from.disabled = to.disabled = arsip;
+    $('dashRangeApply').disabled = $('dashRangeReset').disabled = arsip;
+    if (arsip) {
+      setInfo('Filter tanggal hanya berlaku untuk Periode Aktif.');
+      return;
+    }
+
+    if (lastInfo && lastInfo.year != null) {
+      var min = iso(lastInfo.year, lastInfo.monthIndex, 1);
+      var max = iso(lastInfo.year, lastInfo.monthIndex, lastInfo.dayCount);
+      from.min = to.min = min;
+      from.max = to.max = max;
+      // periode berganti (mis. Mulai Periode Baru) -> buang pilihan lama yang sudah di luar bulan
+      if (state.from && (dayOf(state.from, lastInfo) == null || dayOf(state.to, lastInfo) == null)) {
+        state.from = ''; state.to = '';
+        from.value = ''; to.value = '';
+      }
+    }
+
+    if (lastInfo && lastInfo.active) {
+      var n = lastInfo.dayTo - lastInfo.dayFrom + 1;
+      setInfo('Menampilkan ' + rangeLabel(lastInfo) + ' (' + n + ' hari)', 'active');
+    } else {
+      setInfo('Menampilkan seluruh periode (' + monthLabel(lastInfo) + ')');
+    }
+  }
+
+  function buildBar() {
+    var cards = $('cards');
+    if (!cards || $('dashRangeBar')) return;
+    var bar = document.createElement('div');
+    bar.id = 'dashRangeBar';
+    bar.className = 'dash-range-bar';
+    bar.innerHTML =
+      '<div class="filter-group"><label for="dashFrom">Dari Tanggal:</label><input type="date" id="dashFrom"></div>' +
+      '<div class="filter-group"><label for="dashTo">Sampai Tanggal:</label><input type="date" id="dashTo"></div>' +
+      '<button class="btn btn-primary" id="dashRangeApply" type="button">Terapkan</button>' +
+      '<button class="btn btn-ghost" id="dashRangeReset" type="button">Seluruh Periode</button>' +
+      '<span class="dash-range-info" id="dashRangeInfo"></span>';
+    cards.parentNode.insertBefore(bar, cards);
+
+    $('dashRangeApply').addEventListener('click', applyRange);
+    $('dashRangeReset').addEventListener('click', resetRange);
+    ['dashFrom', 'dashTo'].forEach(function (id) {
+      $(id).addEventListener('keydown', function (e) { if (e.key === 'Enter') applyRange(); });
+    });
+    var ps = $('periodSelector');
+    if (ps) ps.addEventListener('change', syncBar);
+    syncBar();
+  }
+
+  /* ----------------------------- CARD RELIEVER ----------------------------- */
+
+  function ensureRelieverCard() {
+    var host = $('cards');
+    if (!host || !lastReliever) return;
+    var el = $(CARD_ID);
+    if (!el) {
+      el = document.createElement('div');
+      el.id = CARD_ID;
+      el.className = 'card';
+    }
+    var jumlah = Number(lastReliever.jumlah) || 0;
+    var hari = Number(lastReliever.hariTugas) || 0;
+    el.innerHTML =
+      '<div class="card-label">Jumlah Reliever</div>' +
+      '<div class="card-value">' + jumlah + ' <span class="card-unit">orang</span></div>' +
+      '<div class="card-sub">' + hari + ' hari tugas · ' + rangeLabel(lastInfo) + '</div>';
+    var daftar = lastReliever.daftar || [];
+    el.title = daftar.length
+      ? daftar.map(function (r) { return r.nama + ' (' + r.hari + ' hari)'; }).join('\n')
+      : 'Tidak ada reliever bertugas pada rentang ini.';
+    if (el.parentNode !== host || host.lastElementChild !== el) host.appendChild(el);
+  }
+
+  // Aplikasi menggambar ulang #cards setiap data dimuat -> pasang lagi card reliever bila hilang.
+  function watchCards() {
+    var host = $('cards');
+    if (!host || !window.MutationObserver) return;
+    new MutationObserver(function () {
+      if (!$(CARD_ID)) ensureRelieverCard();
+    }).observe(host, { childList: true });
+  }
+
+  /* ----------------------------- INTERSEP getAllData ----------------------------- */
+
+  function capture(json) {
+    var d = json && (json.data !== undefined ? json.data : json);
+    if (!d || d.rangeInfo === undefined) return;   // bukan respons getAllData versi baru
+    lastInfo = d.rangeInfo;
+    lastReliever = d.reliever || null;
+    syncBar();
+    ensureRelieverCard();
+  }
+
+  var origFetch = window.fetch;
+  if (typeof origFetch === 'function') {
+    window.fetch = function (input, init) {
+      try {
+        var url = (typeof input === 'string') ? input : ((input && input.url) || '');
+        var isGet = /[?&]action=data(&|$)/.test(url);
+        var parsed = null, isPost = false;
+        if (init && typeof init.body === 'string') {
+          try { parsed = JSON.parse(init.body); isPost = !!parsed && parsed.action === 'getAllData'; } catch (e) { /* bukan JSON */ }
+        }
+        if (isGet || isPost) {
+          var rg = currentDays();
+          if (rg) {
+            if (isPost) {
+              parsed.dayFrom = rg.from; parsed.dayTo = rg.to;
+              init = Object.assign({}, init, { body: JSON.stringify(parsed) });
+            } else if (typeof input === 'string') {
+              input = url + (url.indexOf('?') > -1 ? '&' : '?') + 'dayFrom=' + rg.from + '&dayTo=' + rg.to;
+            }
+          }
+          return origFetch.call(this, input, init).then(function (res) {
+            try { res.clone().json().then(capture).catch(function () {}); } catch (e) { /* abaikan */ }
+            return res;
+          });
+        }
+      } catch (e) { /* jangan sampai mengganggu request lain */ }
+      return origFetch.apply(this, arguments);
+    };
+  }
+
+  /* ----------------------------- INTERSEP google.script.run (versi Apps Script /exec) ----------------------------- */
+
+  function wrapRunner(runner) {
+    return new Proxy(runner, {
+      get: function (target, prop) {
+        var val = target[prop];
+        if (typeof val !== 'function') return val;
+        if (prop === 'withSuccessHandler') {
+          return function (fn) {
+            return wrapRunner(target.withSuccessHandler(function (res, userObj) {
+              try { capture({ data: res }); } catch (e) { /* abaikan */ }
+              if (typeof fn === 'function') return fn(res, userObj);
+            }));
+          };
+        }
+        if (prop === 'withFailureHandler' || prop === 'withUserObject') {
+          return function (a) { return wrapRunner(target[prop](a)); };
+        }
+        if (prop === 'getAllData') {
+          return function () {
+            var args = Array.prototype.slice.call(arguments);
+            var rg = currentDays();
+            if (rg) {
+              while (args.length < 2) args.push(null);
+              args = args.slice(0, 2).concat([rg.from, rg.to]);
+            }
+            return target.getAllData.apply(target, args);
+          };
+        }
+        return val.bind(target);
+      }
+    });
+  }
+
+  try {
+    if (window.google && google.script && google.script.run && window.Proxy) {
+      var realRun = google.script.run;
+      var wrapped = wrapRunner(realRun);
+      try { google.script.run = wrapped; }
+      catch (e1) { Object.defineProperty(google.script, 'run', { value: wrapped, configurable: true }); }
+    }
+  } catch (e2) { /* kalau gagal, filter tidak aktif tapi aplikasi tetap normal */ }
+
+  function init() { buildBar(); watchCards(); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
+</script>
