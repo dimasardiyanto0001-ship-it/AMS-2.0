@@ -4,26 +4,16 @@
  * tren harian, dan sinkronisasi otomatis OFF Jadwal -> Realisasi.
  * Mendukung filter opsional per Department.
  *
- * BARU (filter rentang tanggal + reliever):
- * - getAllData(token, department, dayFrom, dayTo): dayFrom/dayTo =
- *   nomor hari (1..jumlah hari periode). Kosong = seluruh periode.
- * - Yang ikut terfilter rentang: rekap, dashboard, trenHarian,
- *   jamKerjaRingkasan, reliever. Grid jadwal/realisasi/jamScan TETAP
- *   penuh supaya tab Jadwal & Input Realisasi (yang memakai dayIndex)
- *   tidak bergeser.
- * - Respons ditambah: rangeInfo { year, monthIndex, dayCount, dayFrom,
- *   dayTo, active } dan reliever { jumlah, hariTugas, daftar[] }.
- *
  * Performa:
- * - syncOffFromJadwal_ dibatasi max 1x per THROTTLE_SYNC_SEC.
- * - hasil getAllDataInternal_ di-cache per department + rentang selama
- *   CACHE_ALLDATA_SEC. User lain bisa melihat data tersimpan dengan
- *   jeda sampai CACHE_ALLDATA_SEC detik (self-refresh di poll berikutnya).
+ *  - syncOffFromJadwal_ dibatasi max 1x per THROTTLE_SYNC_SEC.
+ *  - hasil getAllDataInternal_ di-cache per department selama
+ *    CACHE_ALLDATA_SEC. User lain bisa melihat data tersimpan dengan
+ *    jeda sampai CACHE_ALLDATA_SEC detik (self-refresh di poll berikutnya).
  *************************************************************/
 
 const THROTTLE_SYNC_SEC = 45;
 const CACHE_ALLDATA_SEC = 8;
-const CACHE_ALLDATA_PREFIX_ = 'alldata_v2_';   // v2: kunci cache kini memuat rentang tanggal
+const CACHE_ALLDATA_PREFIX_ = 'alldata_v1_';
 const OFFSYNC_THROTTLE_KEY_ = 'offsync_throttle';
 
 /* ============================ HELPER ============================ */
@@ -51,123 +41,21 @@ function cellCode_(val) {
   return (val || '').toString().trim().toUpperCase();
 }
 
-/* ============================ RENTANG TANGGAL ============================ */
-
-/**
- * Ubah dayFrom/dayTo (nomor hari, 1-based) menjadi {from, to, count}, dijepit ke
- * 1..dayCount dan ditukar bila terbalik. Kosong/tidak valid, atau meliputi seluruh
- * periode -> null (artinya: tanpa filter).
- */
-function resolveDayRange_(dayFrom, dayTo, dayCount) {
-  const f = parseInt(dayFrom, 10);
-  const t = parseInt(dayTo, 10);
-  if (isNaN(f) || isNaN(t) || !(dayCount > 0)) return null;
-  let from = Math.max(1, Math.min(f, dayCount));
-  let to = Math.max(1, Math.min(t, dayCount));
-  if (from > to) { const x = from; from = to; to = x; }
-  if (from === 1 && to === dayCount) return null;
-  return { from: from, to: to, count: to - from + 1 };
-}
-
-/** Salinan grid dengan kolom hari dipotong ke rentang (karyawan & urutan baris tetap). */
-function sliceGridDays_(grid, range) {
-  if (!range) return grid;
-  return Object.assign({}, grid, {
-    dayNames: (grid.dayNames || []).slice(range.from - 1, range.to),
-    dayCount: range.count,
-    employees: grid.employees.map(e => Object.assign({}, e, {
-      days: e.days.slice(range.from - 1, range.to)
-    }))
-  });
-}
-
-/** Geser indeks "hari ini" ke koordinat rentang; di luar rentang -> -1. */
-function shiftTodayDayIndex_(idx, range) {
-  if (!range || typeof idx !== 'number' || idx < 0) return idx;
-  const rel = idx - (range.from - 1);
-  return (rel >= 0 && rel < range.count) ? rel : -1;
-}
-
-/**
- * Rekap per karyawan dari DUA grid (dicocokkan per POSISI BARIS, sama seperti getRekap_).
- * Dipakai saat ada filter rentang; tanpa filter tetap memakai getRekap_().
- * Rank 1 = % kehadiran paling rendah (sama dengan getRekap_).
- */
-function buildRekapPositional_(jadwal, realisasi) {
-  const dayCount = Math.min(jadwal.dayCount, realisasi.dayCount);
-  const numEmployees = Math.min(jadwal.employees.length, realisasi.employees.length);
-  const rows = [];
-  for (let i = 0; i < numEmployees; i++) {
-    const j = jadwal.employees[i];
-    const r = realisasi.employees[i];
-    const tally = tallyAttendance_(j.days.slice(0, dayCount), r.days.slice(0, dayCount));
-    const persen = tally.jadwal > 0 ? (tally.hadir / tally.jadwal) : 0;
-    rows.push(makeRekapRow_(r.no || j.no || (i + 1), r.nama || j.nama, r.jabatan || j.jabatan, tally, persen));
-  }
-  rows.slice().sort((a, b) => a.persenKehadiran - b.persenKehadiran)
-    .forEach((row, idx) => { row.rank = idx + 1; });
-  return rows;
-}
-
-/* ============================ RELIEVER ============================ */
-
-/**
- * Ringkasan reliever dari sheet BackupReliever (baris = reliever, kolom = tanggal,
- * isi sel = nama karyawan yang digantikan; terisi saat reliever absen "Masuk").
- *  - jumlah    : jumlah reliever BERBEDA yang bertugas pada rentang
- *  - hariTugas : total hari tugas semua reliever (1 sel terisi = 1 hari)
- * Bila filter Department aktif, hanya sel yang karyawan-digantikannya ada di department itu.
- */
-function computeRelieverSummary_(range, allowedNamesSet) {
-  const empty = { jumlah: 0, hariTugas: 0, daftar: [] };
-  try {
-    const sheet = getSpreadsheet_().getSheetByName(CONFIG.SHEET_BACKUPRELIEVER);
-    if (!sheet) return empty;
-    const grid = readGridFromSheetObj_(sheet);
-    const from = range ? range.from : 1;
-    const to = range ? range.to : grid.dayCount;
-    const daftar = [];
-    let hariTugas = 0;
-    grid.employees.forEach(e => {
-      let hari = 0;
-      e.days.forEach((val, i) => {
-        const day = i + 1;
-        if (day < from || day > to) return;
-        const digantikan = String(val || '').trim();
-        if (!digantikan) return;
-        if (!isNameAllowed_(digantikan, allowedNamesSet)) return;
-        hari++;
-      });
-      if (hari > 0) {
-        // kolom ke-3 sheet BackupReliever = Perusahaan (terbaca sebagai "jabatan" oleh readGrid)
-        daftar.push({ nama: e.nama, perusahaan: e.jabatan || '', hari: hari });
-        hariTugas += hari;
-      }
-    });
-    daftar.sort((a, b) => b.hari - a.hari || String(a.nama).localeCompare(String(b.nama)));
-    return { jumlah: daftar.length, hariTugas: hariTugas, daftar: daftar };
-  } catch (err) {
-    Logger.log('computeRelieverSummary_: ' + err.toString());
-    return empty;
-  }
-}
-
 /* ============================ ENTRY ============================ */
 
-function getAllData(token, department, dayFrom, dayTo) {
+function getAllData(token, department) {
   verifySession_(token);
-  return getCachedAllData_(department, dayFrom, dayTo);
+  return getCachedAllData_(department);
 }
 
-function getCachedAllData_(department, dayFrom, dayTo) {
+function getCachedAllData_(department) {
   const cache = CacheService.getScriptCache();
-  const key = CACHE_ALLDATA_PREFIX_ + String(department || 'ALL') + '_' +
-    String(dayFrom || '') + '-' + String(dayTo || '');
+  const key = CACHE_ALLDATA_PREFIX_ + String(department || 'ALL');
   const cached = cache.get(key);
   if (cached) {
     try { return JSON.parse(cached); } catch (e) { /* cache korup, hitung ulang */ }
   }
-  const result = getAllDataInternal_(false, department, dayFrom, dayTo);
+  const result = getAllDataInternal_(false, department);
   try {
     cache.put(key, JSON.stringify(result), CACHE_ALLDATA_SEC);
   } catch (e) {
@@ -185,7 +73,7 @@ function maybeSyncOffFromJadwal_() {
 
 /* ============================ AGREGASI UTAMA ============================ */
 
-function getAllDataInternal_(skipSync, department, dayFrom, dayTo) {
+function getAllDataInternal_(skipSync, department) {
   if (!skipSync) maybeSyncOffFromJadwal_();
 
   const ss = getSpreadsheet_();
@@ -200,6 +88,7 @@ function getAllDataInternal_(skipSync, department, dayFrom, dayTo) {
 
   let allowedNames = null;
   let jadwal = jadwalFull, realisasi = realisasiFull, jamScan = jamScanFull;
+
   if (isFiltered) {
     const master = getKaryawanMasterMap_();
     allowedNames = new Set(Object.keys(master).filter(k => master[k].department === deptFilter));
@@ -208,25 +97,8 @@ function getAllDataInternal_(skipSync, department, dayFrom, dayTo) {
     jamScan = filterGridByNames_(jamScanFull, allowedNames);
   }
 
-  // ---- Rentang tanggal (opsional) ----
-  const fullDayCount = Math.min(jadwalFull.dayCount, realisasiFull.dayCount);
-  const range = resolveDayRange_(dayFrom, dayTo, fullDayCount);
-
-  let rekapAll;
-  if (range) {
-    const jRange = sliceGridDays_(jadwalFull, range);
-    const rRange = sliceGridDays_(realisasiFull, range);
-    rekapAll = attachJamKerjaToRekap_(
-      attachNikToRekap_(buildRekapPositional_(jRange, rRange)), jRange, null, range);
-  } else {
-    rekapAll = attachJamKerjaToRekap_(attachNikToRekap_(getRekap_()), jadwalFull);
-  }
+  const rekapAll = attachJamKerjaToRekap_(attachNikToRekap_(getRekap_()), jadwalFull);
   const rekap = allowedNames ? rekapAll.filter(r => allowedNames.has(nameKey_(r.nama))) : rekapAll;
-
-  const jadwalAgg = range ? sliceGridDays_(jadwal, range) : jadwal;
-  const realisasiAgg = range ? sliceGridDays_(realisasi, range) : realisasi;
-
-  const my = parsePeriodMonthYear_(String(jadwalFull.period || '').trim());
 
   return {
     period: jadwalFull.period,
@@ -236,23 +108,14 @@ function getAllDataInternal_(skipSync, department, dayFrom, dayTo) {
     realisasi: realisasi.employees,
     dashboard: computeDashboardSummaryFromRekapLengkap_(rekap),
     rekap: rekap,
-    trenHarian: computeTrenHarian_(jadwalAgg, realisasiAgg, jamKerjaSheet, allowedNames, range, fullDayCount),
+    trenHarian: computeTrenHarian_(jadwal, realisasi, jamKerjaSheet, allowedNames),
     jamKerjaRingkasan: computeJamKerjaRingkasan_(rekap),
     statusCodes: CONFIG.STATUS_CODES,
     shiftCodes: getShiftCodesDynamic_(),
     alignmentWarnings: checkRowAlignment_(jadwalFull, realisasiFull),
     departmentFilter: isFiltered ? deptFilter : null,
     lastUpdate: new Date().toISOString(),
-    jamScan: jamScan.employees,
-    rangeInfo: {
-      year: my ? my.year : null,
-      monthIndex: my ? my.monthIndex : null,
-      dayCount: fullDayCount,
-      dayFrom: range ? range.from : 1,
-      dayTo: range ? range.to : fullDayCount,
-      active: !!range
-    },
-    reliever: computeRelieverSummary_(range, allowedNames)
+    jamScan: jamScan.employees
   };
 }
 
@@ -261,14 +124,11 @@ function getAllDataInternal_(skipSync, department, dayFrom, dayTo) {
 /** Kode Realisasi -> nama deret tren (selain hadir/lembur yang ditangani khusus). */
 const TREN_CODE_TO_SERIES_ = { 'A': 'alfa', 'I': 'izin', 'S': 'sakit', 'C': 'cuti', 'OFF': 'off' };
 
-/**
- * @param range         opsional {from,to,count}: jadwal & realisasi SUDAH dipotong ke rentang ini
- * @param fullDayCount  jumlah hari periode penuh (untuk menghitung indeks "hari ini")
- */
-function computeTrenHarian_(jadwal, realisasi, jamKerjaSheet, allowedNamesSet, range, fullDayCount) {
+function computeTrenHarian_(jadwal, realisasi, jamKerjaSheet, allowedNamesSet) {
   const dayCount = realisasi.dayCount;
   const dayNames = realisasi.dayNames;
   const zeros = () => new Array(dayCount).fill(0);
+
   const s = { hadir: zeros(), lembur: zeros(), alfa: zeros(), izin: zeros(), sakit: zeros(), cuti: zeros(), off: zeros() };
   const planCount = zeros();
 
@@ -288,40 +148,53 @@ function computeTrenHarian_(jadwal, realisasi, jamKerjaSheet, allowedNamesSet, r
     });
   });
 
+  // Target jam kerja per hari (dari kode shift di Jadwal): dipakai kartu dashboard saat filter tanggal.
+  const shiftMap = getShiftCodesDynamic_();
+  const targetJamPerHari = zeros();
+
   jadwal.employees.forEach(emp => {
     if (!isNameAllowed_(emp.nama, allowedNamesSet)) return;
     emp.days.forEach((val, i) => {
       if (i >= dayCount) return;
       const code = cellCode_(val);
       if (code !== 'OFF' && code !== '') planCount[i]++;
+      if (shiftMap.hasOwnProperty(code)) targetJamPerHari[i] += Number(shiftMap[code].targetJam) || 0;
     });
   });
+
+  const jamDetail = computeJamKerjaPerHariDetail_(dayCount, jamKerjaSheet, allowedNamesSet);
 
   return {
     dayNames, dayCount,
     hadir: s.hadir, lembur: s.lembur, alfa: s.alfa, izin: s.izin, sakit: s.sakit, cuti: s.cuti, off: s.off,
     planCount,
     actualCount: s.hadir,
-    totalJamKerjaPerHari: computeJamKerjaTrend_(dayCount, jamKerjaSheet, allowedNamesSet, range ? range.from - 1 : 0),
-    todayDayIndex: shiftTodayDayIndex_(computeTodayDayIndex_(realisasi.period, fullDayCount || dayCount), range)
+    totalJamKerjaPerHari: jamDetail.total,
+    jumlahEntriJamPerHari: jamDetail.count,
+    targetJamPerHari: targetJamPerHari.map(round2_),
+    todayDayIndex: computeTodayDayIndex_(realisasi.period, dayCount)
   };
 }
 
-/** @param offset indeks kolom hari pertama yang diambil (0 = dari awal periode). */
-function computeJamKerjaTrend_(dayCount, jamKerjaSheet, allowedNamesSet, offset) {
+/** Total jam kerja dan jumlah entri (karyawan-hari yang punya jam) per hari. */
+function computeJamKerjaPerHariDetail_(dayCount, jamKerjaSheet, allowedNamesSet) {
   const total = new Array(dayCount).fill(0);
-  if (!jamKerjaSheet) return total;
-  const off = offset || 0;
+  const count = new Array(dayCount).fill(0);
+  if (!jamKerjaSheet) return { total: total, count: count };
+
   readGridFromSheetObj_(jamKerjaSheet).employees.forEach(emp => {
     if (!isNameAllowed_(emp.nama, allowedNamesSet)) return;
     emp.days.forEach((val, i) => {
-      const idx = i - off;
-      if (idx < 0 || idx >= dayCount) return;
+      if (i >= dayCount) return;
       const num = Number(val);
-      if (val !== '' && val !== null && !isNaN(num)) total[idx] += num;
+      if (val !== '' && val !== null && !isNaN(num)) { total[i] += num; count[i]++; }
     });
   });
-  return total.map(round2_);
+  return { total: total.map(round2_), count: count };
+}
+
+function computeJamKerjaTrend_(dayCount, jamKerjaSheet, allowedNamesSet) {
+  return computeJamKerjaPerHariDetail_(dayCount, jamKerjaSheet, allowedNamesSet).total;
 }
 
 /* ============================ RINGKASAN DASHBOARD ============================ */
@@ -410,6 +283,7 @@ function syncOffFromJadwal_() {
 
   const numRows = Math.min(getLastEmployeeRow_(jadwalSheet), getLastEmployeeRow_(realisasiSheet)) - CONFIG.DATA_START_ROW + 1;
   if (numRows <= 0) return { updated: 0 };
+
   const dayCount = Math.min(getDayColCount_(jadwalSheet), getDayColCount_(realisasiSheet));
   if (dayCount <= 0) return { updated: 0 };
 
