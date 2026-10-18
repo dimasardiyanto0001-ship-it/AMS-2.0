@@ -341,11 +341,11 @@ const TAB_TITLES_ = {
     if (p) p.classList.toggle('hidden', !show);
   }
 
-  /** Muat ringkasan reliever (maks 1x per 60 detik kecuali dipaksa). Gagal = panel disembunyikan, dashboard tetap jalan. */
+  /** Muat data reliever (maks 1x per 60 detik kecuali dipaksa). Gagal = pesan error di panel, dashboard tetap jalan. */
   function loadRelieverSummary_(force) {
     if (!SESSION || currentViewPeriodKey !== 'active') { setRelieverPanelVisible_(false); return; }
     if (relieverSummaryLoading_) return;
-    if (relieverSummaryToken_ !== SESSION.token) { RELIEVER_SUMMARY_ = null; relieverSummaryToken_ = SESSION.token; } // ganti akun = data lama dibuang
+    if (relieverSummaryToken_ !== SESSION.token) { RELIEVER_SUMMARY_ = null; dashRange_ = null; relieverSummaryToken_ = SESSION.token; } // ganti akun = data lama dibuang
     if (!force && RELIEVER_SUMMARY_ && Date.now() - relieverSummaryLoadedAt_ < RELIEVER_REFRESH_MS) { renderRelieverPanel_(); return; }
     relieverSummaryLoading_ = true;
     google.script.run
@@ -363,40 +363,29 @@ const TAB_TITLES_ = {
       .getRelieverSummary(SESSION.token);
   }
 
-  function relieverStatusBadge_(status) {
-    if (status === 'Valid') return '<span style="color:#16a34a;font-weight:600;">Valid</span>';
-    if (status === 'Di Luar Radius') return '<span style="color:#dc2626;font-weight:600;">Di Luar Radius</span>';
-    return escapeHtml(status || '-');
-  }
-
   function showRelieverError_(msg) {
     setRelieverPanelVisible_(true);
     const e = document.getElementById('relieverError');
     if (e) { e.textContent = 'Data reliever gagal dimuat: ' + msg; e.classList.remove('hidden'); }
-    ['relieverCards', 'relieverBelumDigantikan', 'relieverTodayWrap', 'relieverMatrixWrap', 'relieverRekapWrap'].forEach(id => {
-      const el = document.getElementById(id); if (el) el.innerHTML = '';
+    const c = document.getElementById('relieverCards');
+    if (c) c.innerHTML = '';
+  }
+
+  /** Hitung kartu reliever untuk rentang tanggal dari..sampai (inklusif) dari data per hari. */
+  function hitungKartuReliever_(data, dari, sampai) {
+    const rows = (data || []).filter(r => r.hari >= dari && r.hari <= sampai);
+    const relieverSet = {}, digantikanSet = {};
+    rows.forEach(r => {
+      relieverSet[String(r.reliever).toLowerCase()] = true;
+      digantikanSet[String(r.menggantikan).toLowerCase()] = true;
     });
-  }
-
-  function onRelieverFilterChange() { renderRelieverPanel_(); }
-
-  function relieverMatch_(q, perusahaanFilter, perusahaan, teks) {
-    if (perusahaanFilter && String(perusahaan || '') !== perusahaanFilter) return false;
-    if (!q) return true;
-    return teks.join(' ').toLowerCase().indexOf(q) !== -1;
-  }
-
-  function fillRelieverPerusahaan_(s) {
-    const sel = document.getElementById('relieverPerusahaan');
-    if (!sel) return;
-    const set = {};
-    ((s.hariIni && s.hariIni.rows) || []).forEach(r => { if (r.perusahaan) set[r.perusahaan] = true; });
-    ((s.rekap && s.rekap.perReliever) || []).forEach(r => { if (r.perusahaan) set[r.perusahaan] = true; });
-    const list = Object.keys(set).sort();
-    const prev = sel.value;
-    sel.innerHTML = '<option value="">Semua Perusahaan</option>' +
-      list.map(p => `<option value="${escapeHtml(p).replace(/"/g, '&quot;')}">${escapeHtml(p)}</option>`).join('');
-    if (list.indexOf(prev) !== -1) sel.value = prev;
+    return {
+      reliever: Object.keys(relieverSet).length,
+      penggantian: rows.length,
+      digantikan: Object.keys(digantikanSet).length,
+      luarRadius: rows.filter(r => r.status === 'Di Luar Radius').length,
+      belumPulang: rows.filter(r => r.belumPulang).length
+    };
   }
 
   function renderRelieverPanel_() {
@@ -406,119 +395,32 @@ const TAB_TITLES_ = {
     const errEl = document.getElementById('relieverError');
     if (errEl) errEl.classList.add('hidden');
 
-    fillRelieverPerusahaan_(s);
-    const q = String((document.getElementById('relieverSearch') || {}).value || '').trim().toLowerCase();
-    const pf = String((document.getElementById('relieverPerusahaan') || {}).value || '');
-    const filtering = !!(q || pf);
+    // Rentang tanggal = filter dashboard yang sama dengan kartu lain.
+    const maxHari = s.jumlahHari || (STATE && STATE.dayCount) || 31;
+    const r = getDashRange_();
+    const a = r.dari, b = Math.min(r.sampai || maxHari, maxHari);
 
-    const h = s.hariIni || {};
-    const allRows = h.rows || [];
-    const rows = allRows.filter(r => relieverMatch_(q, pf, r.perusahaan, [r.reliever, r.menggantikan, r.perusahaan]));
+    const k = hitungKartuReliever_(s.data, a, b);
+    document.getElementById('relieverRentangLabel').textContent =
+      (s.periode ? s.periode.replace(/^periode\s*:?\s*/i, '') + ' | ' : '') + 'Tanggal ' + (a === b ? a : a + ' - ' + b);
 
-    document.getElementById('relieverTanggal').textContent = s.tanggal || '';
-
-    const uniq = {};
-    rows.forEach(r => { uniq[String(r.reliever).toLowerCase()] = true; });
     const cards = [
-      { label: 'Reliever Hadir Hari Ini', value: Object.keys(uniq).length },
-      { label: 'Karyawan Digantikan', value: rows.length, sub: (!filtering && h.butuhPengganti !== null && h.butuhPengganti !== undefined) ? 'dari ' + h.butuhPengganti + ' yang A/I/S' : '' },
-      { label: 'Belum Pulang', value: rows.filter(r => r.jamMasuk && !r.jamPulang).length },
-      { label: 'Di Luar Radius', value: rows.filter(r => r.status === 'Di Luar Radius').length }
+      { label: 'Jumlah Reliever', value: k.reliever, sub: 'unik pada rentang ini' },
+      { label: 'Total Penggantian', value: k.penggantian, sub: 'reliever x hari' },
+      { label: 'Karyawan Digantikan', value: k.digantikan, sub: 'unik' },
+      { label: 'Di Luar Radius', value: k.luarRadius, color: k.luarRadius ? '#ef4444' : '' }
     ];
-    cards[2].color = cards[2].value ? '#f59e0b' : '';
-    cards[3].color = cards[3].value ? '#ef4444' : '';
     document.getElementById('relieverCards').innerHTML = cards.map(c => `
       <div class="card">
         <div class="card-label">${c.label}</div>
-        <div class="card-value"${c.color ? ` style="color:${c.color}"` : ''}>${c.value ?? '-'}</div>
+        <div class="card-value"${c.color ? ` style="color:${c.color}"` : ''}>${c.value}</div>
         ${c.sub ? `<div class="card-sub">${escapeHtml(c.sub)}</div>` : ''}
       </div>`).join('');
 
-    const belum = filtering ? [] : (h.belumDigantikan || []);
-    document.getElementById('relieverBelumDigantikan').textContent = belum.length
-      ? 'Belum ada pengganti: ' + belum.map(k => k.nama + ' (' + k.jenis + ')').join(', ')
-      : '';
-
-    const wrap = document.getElementById('relieverTodayWrap');
-    if (!rows.length) {
-      wrap.innerHTML = '<p class="muted">' + (filtering ? 'Tidak ada data yang cocok dengan filter.' : 'Belum ada reliever yang absen hari ini.') + '</p>';
-    } else {
-      wrap.innerHTML = '<table><thead><tr><th>Reliever</th><th>Perusahaan</th><th>Menggantikan</th><th>Masuk</th><th>Pulang</th><th>Jarak</th><th>Status</th><th>Foto</th></tr></thead><tbody>' +
-        rows.map(r => `<tr>
-          <td>${escapeHtml(r.reliever)}</td>
-          <td>${escapeHtml(r.perusahaan)}</td>
-          <td>${escapeHtml(r.menggantikan)}${r.jenisDigantikan ? ' <span class="muted">(' + escapeHtml(r.jenisDigantikan) + ')</span>' : ''}</td>
-          <td>${escapeHtml(r.jamMasuk || '-')}</td>
-          <td>${escapeHtml(r.jamPulang || '-')}</td>
-          <td>${r.jarak === null || r.jarak === undefined ? '-' : escapeHtml(r.jarak) + ' m'}</td>
-          <td>${relieverStatusBadge_(r.status)}</td>
-          <td>${String(r.fotoUrl || '').indexOf('https:') === 0 ? '<a href="' + escapeHtml(r.fotoUrl).replace(/"/g, '&quot;') + '" target="_blank" rel="noopener">Lihat</a>' : '-'}</td>
-        </tr>`).join('') + '</tbody></table>';
-    }
-
-    const rk = s.rekap || {};
-    const sum = document.getElementById('relieverRekapSummary');
-    const rekapWrap = document.getElementById('relieverRekapWrap');
-    const perRel = (rk.perReliever || []).filter(r => relieverMatch_(q, pf, r.perusahaan, [r.nama, r.perusahaan]));
-    if (!rk.tersedia) {
-      sum.textContent = 'Rekap periode';
-      rekapWrap.innerHTML = '<p class="muted">Belum ada data rekap untuk periode aktif.</p>';
-    } else {
-      sum.textContent = 'Rekap periode ' + (s.periode || '') + ': ' +
-        perRel.reduce((a, r) => a + r.hari, 0) + ' hari penggantian oleh ' + perRel.filter(r => r.hari > 0).length + ' reliever';
-      rekapWrap.innerHTML = perRel.length
-        ? '<table><thead><tr><th>Reliever</th><th>Perusahaan</th><th>Jumlah Hari</th></tr></thead><tbody>' +
-          perRel.map(r => `<tr><td>${escapeHtml(r.nama)}</td><td>${escapeHtml(r.perusahaan)}</td><td>${r.hari}</td></tr>`).join('') + '</tbody></table>'
-        : '<p class="muted">Belum ada reliever yang tercatat pada periode ini.</p>';
-    }
-
-    renderRelieverMatrix_(rk, s.tanggal, q, pf);
-
     const t = s.terdaftar || {};
     document.getElementById('relieverHint').textContent =
-      'Reliever terdaftar: ' + (t.aktif ?? 0) + ' aktif dari ' + (t.total ?? 0) + '. Hanya reliever yang terdaftar di sheet DataReliever yang bisa absen.';
-  }
-
-  /** Matriks periode seperti tabel Realisasi: baris = reliever, kolom = tanggal, isi sel = karyawan yang digantikan. */
-  function renderRelieverMatrix_(rk, tanggal, q, pf) {
-    const wrap = document.getElementById('relieverMatrixWrap');
-    if (!wrap) return;
-    const rows = ((rk && rk.matriks) || []).filter(r => relieverMatch_(q || '', pf || '', r.perusahaan, [r.nama, r.perusahaan].concat(r.days || [])));
-    if (!rk || !rk.tersedia || !rows.length) {
-      wrap.innerHTML = '<p class="muted">Belum ada reliever yang tercatat pada periode ini.</p>';
-      return;
-    }
-    const dayCount = (rk.perHari || []).length;
-    const dayNames = rk.dayNames || [];
-    const todayNum = parseInt(String(tanggal || '').slice(8, 10), 10);
-    let html = '<table><thead><tr><th class="name-col">Nama Reliever</th><th>Perusahaan</th>';
-    for (let i = 0; i < dayCount; i++) {
-      const hl = (i + 1 === todayNum) ? ' style="background:#fef9c3"' : '';
-      html += `<th${hl}>${i + 1}<br><span class="muted">${escapeHtml(dayNames[i] || '')}</span></th>`;
-    }
-    html += '<th>Total</th></tr></thead><tbody>';
-    rows.forEach(r => {
-      let total = 0;
-      html += `<tr data-name="${escapeHtml((r.nama || '').toLowerCase())}"><td class="name-col">${escapeHtml(r.nama)}</td><td>${escapeHtml(r.perusahaan)}</td>`;
-      for (let i = 0; i < dayCount; i++) {
-        const v = (r.days && r.days[i]) || '';
-        if (v) {
-          total++;
-          const singkat = v.split(/\s+/)[0].substring(0, 7);
-          html += `<td class="day-cell" title="${escapeHtml(v).replace(/"/g, '&quot;')}" style="background:rgba(13,148,136,0.18);color:#0f766e;font-size:11px;">${escapeHtml(singkat)}</td>`;
-        } else {
-          html += '<td class="day-cell" style="color:#cbd5e1">·</td>';
-        }
-      }
-      html += `<td><b>${total}</b></td></tr>`;
-    });
-    const perHari = new Array(dayCount).fill(0);
-    let grand = 0;
-    rows.forEach(r => (r.days || []).forEach((v, i) => { if (v && i < dayCount) { perHari[i]++; grand++; } }));
-    html += '<tr><td class="name-col"><b>Jumlah per hari</b></td><td></td>';
-    for (let i = 0; i < dayCount; i++) html += `<td class="day-cell"><b>${perHari[i] || ''}</b></td>`;
-    html += `<td><b>${grand}</b></td></tr></tbody></table>`;
-    wrap.innerHTML = html;
+      (k.belumPulang ? 'Belum absen pulang: ' + k.belumPulang + '. ' : '') +
+      'Reliever terdaftar: ' + (t.aktif ?? 0) + ' aktif dari ' + (t.total ?? 0) + '. Rentang tanggal mengikuti filter di atas.';
   }
 
   /* ============ ARSIP PERIODE ============ */
@@ -1096,38 +998,13 @@ renderGrid('realisasiWrap', STATE.realisasi, STATE.dayCount, STATE.dayNames, STA
   let chartAbsenPie = null;
   let chartTrenBulanan = null;
   let chartAvgJamKerjaSparkline = null;
-  let currentPeriod = 'all';   // 'all' atau 'week-0', 'week-1', dst
   let currentTrenType = 'line'; // 'line' atau 'bar'
 
-  function ensurePeriodOptions(dayCount) {
-    const sel = document.getElementById('periodFilter');
-    if (sel.dataset.builtFor === String(dayCount)) return;
-    const weeks = Math.ceil(dayCount / 7);
-    let html = `<option value="all">Semua Hari (1-${dayCount})</option>`;
-    for (let w = 0; w < weeks; w++) {
-      const start = w * 7 + 1;
-      const end = Math.min((w + 1) * 7, dayCount);
-      html += `<option value="week-${w}">Minggu ${w + 1} (Tgl ${start}-${end})</option>`;
-    }
-    sel.innerHTML = html;
-    sel.dataset.builtFor = String(dayCount);
-    sel.value = (currentPeriod === 'all' || sel.querySelector(`option[value="${currentPeriod}"]`)) ? currentPeriod : 'all';
-    currentPeriod = sel.value;
-  }
-
+  /** Indeks hari (0-based) yang ditampilkan grafik = rentang tanggal filter Dashboard (sama dengan kartu). */
   function getPeriodIndices(dayCount) {
-    if (currentPeriod === 'all') {
-      return Array.from({ length: dayCount }, (_, i) => i);
-    }
-    const w = parseInt(currentPeriod.split('-')[1], 10);
-    const start = w * 7;
-    const end = Math.min(start + 7, dayCount);
-    return Array.from({ length: Math.max(end - start, 0) }, (_, i) => start + i);
-  }
-
-  function onPeriodFilterChange() {
-    currentPeriod = document.getElementById('periodFilter').value;
-    renderCharts();
+    const r = getDashRange_();
+    const dari = Math.max(r.dari, 1), sampai = Math.min(r.sampai || dayCount, dayCount);
+    return Array.from({ length: Math.max(sampai - dari + 1, 0) }, (_, i) => dari - 1 + i);
   }
 
   function onChartTypeChange() {
@@ -1188,7 +1065,6 @@ function ensureJamKerjaChartCards_() {
   function renderCharts() {
     if (typeof Chart === 'undefined' || !STATE.trenHarian) return;
     const t = STATE.trenHarian;
-    ensurePeriodOptions(t.dayCount);
     const idx = getPeriodIndices(t.dayCount);
 
     // BARU: hari ke berapa (0-based) yang sudah "terjadi" secara real-time.
@@ -1416,9 +1292,10 @@ function renderAvgJamKerjaSparkline_() {
   const canvas = document.getElementById('avgJamKerjaSparkline');
   if (!canvas || !STATE.trenHarian || !STATE.trenHarian.totalJamKerjaPerHari) return;
   if (chartAvgJamKerjaSparkline) chartAvgJamKerjaSparkline.destroy();
+  const range = getDashRange_();
   const data = STATE.trenHarian.totalJamKerjaPerHari;
   const todayIdx = (typeof STATE.trenHarian.todayDayIndex === 'number') ? STATE.trenHarian.todayDayIndex : data.length;
-  const values = data.map((v, i) => (i < todayIdx ? v : null));
+  const values = data.map((v, i) => (i < todayIdx ? v : null)).slice(range.dari - 1, range.sampai);
   chartAvgJamKerjaSparkline = new Chart(canvas, {
     type: 'line',
     data: {
@@ -1487,26 +1364,120 @@ function renderAvgJamKerjaSparkline_() {
       '</ul>';
     el.classList.remove('hidden');
   }
+  /* ============ FILTER TANGGAL DASHBOARD (berlaku untuk semua kartu + Rincian Absen + Reliever) ============ */
+
+  let dashRange_ = null; // { dari, sampai }; null = seluruh periode
+
+  function getDashRange_() {
+    const n = (STATE && STATE.dayCount) || 0;
+    if (!n || !dashRange_) return { dari: 1, sampai: n, penuh: true };
+    const dari = Math.min(Math.max(parseInt(dashRange_.dari, 10) || 1, 1), n);
+    const sampai = Math.min(Math.max(parseInt(dashRange_.sampai, 10) || n, dari), n);
+    return { dari: dari, sampai: sampai, penuh: dari === 1 && sampai === n };
+  }
+
+  function sumRange_(arr, dari, sampai) {
+    let s = 0;
+    if (!Array.isArray(arr)) return s;
+    for (let i = dari - 1; i < sampai && i < arr.length; i++) s += Number(arr[i]) || 0;
+    return s;
+  }
+
+  function round2Front_(n) { return Math.round(n * 100) / 100; }
+
+  /** Angka kartu untuk rentang tanggal terpilih, dari deret harian (trenHarian). Null bila data harian tidak tersedia. */
+  function computeRangeFigures_(range) {
+    const th = STATE && STATE.trenHarian;
+    if (!th || !Array.isArray(th.planCount) || !Array.isArray(th.hadir)) return null;
+    const S = a => sumRange_(a, range.dari, range.sampai);
+    const jadwal = S(th.planCount), hadir = S(th.hadir);
+    const jam = Array.isArray(th.totalJamKerjaPerHari) ? round2Front_(S(th.totalJamKerjaPerHari)) : 0;
+    const target = Array.isArray(th.targetJamPerHari) ? round2Front_(S(th.targetJamPerHari)) : null;
+    return {
+      jadwal: jadwal, hadir: hadir,
+      alfa: S(th.alfa), izin: S(th.izin), sakit: S(th.sakit), cuti: S(th.cuti), off: S(th.off),
+      persen: jadwal > 0 ? Math.round((hadir / jadwal) * 100) + '%' : '0%',
+      jam: jam, target: target,
+      hariJam: Array.isArray(th.jumlahEntriJamPerHari) ? S(th.jumlahEntriJamPerHari) : null
+    };
+  }
+
+  function ensureDashRangeOptions_() {
+    const n = (STATE && STATE.dayCount) || 0;
+    const dari = document.getElementById('dashDari');
+    const sampai = document.getElementById('dashSampai');
+    if (!dari || !sampai || !n) return;
+    if (dari.options.length !== n) {
+      const opts = Array.from({ length: n }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join('');
+      dari.innerHTML = opts; sampai.innerHTML = opts;
+    }
+    const r = getDashRange_();
+    dari.value = String(r.dari);
+    sampai.value = String(r.sampai);
+    const note = document.getElementById('dashRangeNote');
+    if (note) {
+      const bisa = !!computeRangeFigures_({ dari: 1, sampai: n });
+      note.textContent = r.penuh ? 'Menampilkan seluruh periode.' :
+        (bisa ? 'Kartu dan Rincian Absen dihitung untuk tanggal ' + (r.dari === r.sampai ? r.dari : r.dari + ' - ' + r.sampai) + '.' :
+          'Data harian belum tersedia, menampilkan seluruh periode.');
+    }
+  }
+
+  function onDashRangeChange(sel) {
+    const dari = document.getElementById('dashDari');
+    const sampai = document.getElementById('dashSampai');
+    let a = parseInt(dari.value, 10), b = parseInt(sampai.value, 10);
+    if (a > b) { if (sel === dari) b = a; else a = b; } // rentang terbalik dirapikan
+    dashRange_ = { dari: a, sampai: b };
+    applyDashRange_();
+  }
+
+  function setDashRangeHariIni() {
+    const th = STATE && STATE.trenHarian;
+    const idx = th && typeof th.todayDayIndex === 'number' ? th.todayDayIndex : null; // jumlah hari yang sudah lewat
+    const n = (STATE && STATE.dayCount) || 1;
+    const h = idx !== null ? Math.min(Math.max(idx, 1), n) : Math.min(new Date().getDate(), n);
+    dashRange_ = { dari: h, sampai: h };
+    applyDashRange_();
+  }
+
+  function setDashRangePenuh() {
+    dashRange_ = null;
+    applyDashRange_();
+  }
+
+  function applyDashRange_() {
+    if (!STATE) return;
+    renderCards();
+    renderCharts();
+    if (typeof renderRelieverPanel_ === 'function') renderRelieverPanel_();
+  }
+
   function renderCards() {
     const d = STATE.dashboard;
 
     const rekapForTotals_ = (STATE.rekap || []).filter(r => r.nama && String(r.nama).trim() !== '');
-    const totalAlfa = rekapForTotals_.reduce((s, r) => s + (Number(r.alfa) || 0), 0);
-    const totalIzin = rekapForTotals_.reduce((s, r) => s + (Number(r.izin) || 0), 0);
-    const totalSakit = rekapForTotals_.reduce((s, r) => s + (Number(r.sakit) || 0), 0);
-    const totalTidakHadir = totalAlfa + totalIzin + totalSakit;
-    const totalHadirNum = rekapForTotals_.reduce((s, r) => s + (Number(r.hadir) || 0), 0);
+    const range = getDashRange_();
+    const rf = range.penuh ? null : computeRangeFigures_(range); // null = pakai angka seluruh periode
+    ensureDashRangeOptions_();
 
-    const prevMetrics = computeComparableMetrics_(PREV_PERIOD_DASHBOARD_);
+    const totalAlfa = rf ? rf.alfa : rekapForTotals_.reduce((s, r) => s + (Number(r.alfa) || 0), 0);
+    const totalIzin = rf ? rf.izin : rekapForTotals_.reduce((s, r) => s + (Number(r.izin) || 0), 0);
+    const totalSakit = rf ? rf.sakit : rekapForTotals_.reduce((s, r) => s + (Number(r.sakit) || 0), 0);
+    const totalTidakHadir = totalAlfa + totalIzin + totalSakit;
+    const totalHadirNum = rf ? rf.hadir : rekapForTotals_.reduce((s, r) => s + (Number(r.hadir) || 0), 0);
+
+    // Perbandingan dengan periode sebelumnya hanya masuk akal untuk seluruh periode.
+    const prevMetrics = rf ? null : computeComparableMetrics_(PREV_PERIOD_DASHBOARD_);
     const trendTotalHadir = prevMetrics ? renderTrendBadge_(totalHadirNum, prevMetrics.totalHadir, true) : '';
 
     const cardsData = [
       { label: 'Total Karyawan', value: d['TOTAL KARYAWAN'] },
-      { label: 'Total Hari Kerja Terjadwal', value: d['TOTAL HARI KERJA TERJADWAL'] },
-      { label: 'Total Hadir Aktual', value: d['TOTAL HADIR AKTUAL'], color: '#22c55e', trend: trendTotalHadir },
-      { label: 'Rata-rata Kehadiran', value: d['RATA-RATA KEHADIRAN'] },
+      { label: 'Total Hari Kerja Terjadwal', value: rf ? rf.jadwal : d['TOTAL HARI KERJA TERJADWAL'] },
+      { label: 'Total Hadir Aktual', value: rf ? rf.hadir : d['TOTAL HADIR AKTUAL'], color: '#22c55e', trend: trendTotalHadir },
+      { label: 'Rata-rata Kehadiran', value: rf ? rf.persen : d['RATA-RATA KEHADIRAN'] },
       { label: 'Total Tidak Hadir (Alfa/Izin/Sakit)', value: totalTidakHadir, color: '#ef4444' },
-      { label: 'Total OFF (Libur)', value: d['TOTAL OFF (LIBUR)'] }
+      { label: 'Total OFF (Libur)', value: rf ? rf.off : d['TOTAL OFF (LIBUR)'] }
     ];
 
     let html = cardsData.map(c => `
@@ -1516,7 +1487,14 @@ function renderAvgJamKerjaSparkline_() {
       </div>
     `).join('');
 
-    const jk = STATE.jamKerjaRingkasan;
+    let jk = STATE.jamKerjaRingkasan;
+    if (jk && rf) {
+      jk = {
+        totalJamKerja: rf.jam,
+        totalTargetJam: rf.target === null ? '-' : rf.target,
+        totalKekuranganJam: rf.target === null ? 0 : round2Front_(rf.target - rf.jam)
+      };
+    }
     if (jk) {
       const kurang = jk.totalKekuranganJam;
       const kurangColor = kurang > 0 ? '#ef4444' : '#22c55e';
@@ -1533,7 +1511,7 @@ function renderAvgJamKerjaSparkline_() {
         </div>
         <div class="card">
           <div class="card-label">Kekurangan Jam</div>
-          <div class="card-value" style="color:${kurangColor}">${kurang > 0 ? kurang : 0} jam${trendKurang}</div>
+          <div class="card-value" style="color:${kurangColor}">${jk.totalTargetJam === '-' ? '-' : (kurang > 0 ? kurang : 0)} jam${trendKurang}</div>
         </div>
         <div class="card">
           <div class="card-label-row">
@@ -1541,7 +1519,7 @@ function renderAvgJamKerjaSparkline_() {
             <select id="avgJamKerjaFilter" onchange="onAvgJamKerjaFilterChange()">
               <option value="hari" ${avgJamKerjaMode === 'hari' ? 'selected' : ''}>Per Hari</option>
               <option value="minggu" ${avgJamKerjaMode === 'minggu' ? 'selected' : ''}>Per Minggu</option>
-              <option value="bulan" ${avgJamKerjaMode === 'bulan' ? 'selected' : ''}>Per Bulan</option>
+              <option value="bulan" ${avgJamKerjaMode === 'bulan' ? 'selected' : ''}>${rf ? 'Per Rentang' : 'Per Bulan'}</option>
             </select>
           </div>
           <div class="card-value" style="color:#0ea5e9" id="avgJamKerjaValue">-</div>
@@ -1644,9 +1622,15 @@ function renderAvgJamKerjaSparkline_() {
     if (!el) return;
 
     const rekap = (STATE.rekap || []).filter(r => r.nama && String(r.nama).trim() !== '');
-    const totalJamKerja = rekap.reduce((s, r) => s + (Number(r.totalJamKerja) || 0), 0);
-    const totalHariKerja = rekap.reduce((s, r) => s + (Number(r.totalHariKerja) || 0), 0);
+    let totalJamKerja = rekap.reduce((s, r) => s + (Number(r.totalJamKerja) || 0), 0);
+    let totalHariKerja = rekap.reduce((s, r) => s + (Number(r.totalHariKerja) || 0), 0);
     const jumlahKaryawan = rekap.length;
+
+    const range = getDashRange_();
+    if (!range.penuh) {
+      const rf = computeRangeFigures_(range);
+      if (rf && rf.hariJam !== null) { totalJamKerja = rf.jam; totalHariKerja = rf.hariJam; }
+    }
 
     const avgPerHari = totalHariKerja > 0 ? (totalJamKerja / totalHariKerja) : 0;
 
