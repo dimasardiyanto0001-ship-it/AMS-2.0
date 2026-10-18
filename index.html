@@ -203,6 +203,21 @@
 
     <!-- ============ TAB: DASHBOARD ============ -->
     <section id="tab-dashboard" class="tab-content active">
+      <div class="chart-toolbar" id="dashRangeBar">
+        <div class="filter-group">
+          <label for="dashDari">Filter tanggal - Dari:</label>
+          <select id="dashDari" onchange="onDashRangeChange(this)"></select>
+        </div>
+        <div class="filter-group">
+          <label for="dashSampai">Sampai:</label>
+          <select id="dashSampai" onchange="onDashRangeChange(this)"></select>
+        </div>
+        <div class="filter-group">
+          <button class="btn btn-primary" type="button" onclick="setDashRangeHariIni()">Hari Ini</button>
+          <button class="btn btn-primary" type="button" onclick="setDashRangePenuh()">Seluruh Periode</button>
+        </div>
+        <span class="muted" id="dashRangeNote"></span>
+      </div>
       <div id="cards" class="cards"></div>
 
       <div class="panel" id="absenPiePanel">
@@ -221,43 +236,15 @@
 
       <div class="panel" id="relieverPanel">
         <div class="panel-header">
-          <h3>Reliever Hari Ini</h3>
-          <span class="muted" id="relieverTanggal"></span>
+          <h3>Reliever</h3>
+          <span class="muted" id="relieverRentangLabel"></span>
         </div>
         <div id="relieverError" class="hidden" style="background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:13px;"></div>
-        <div class="chart-toolbar" id="relieverFilters">
-          <div class="filter-group">
-            <label for="relieverSearch">Cari:</label>
-            <input type="text" id="relieverSearch" class="search-input" placeholder="Nama reliever / karyawan digantikan..." oninput="onRelieverFilterChange()">
-          </div>
-          <div class="filter-group">
-            <label for="relieverPerusahaan">Perusahaan:</label>
-            <select id="relieverPerusahaan" onchange="onRelieverFilterChange()"><option value="">Semua Perusahaan</option></select>
-          </div>
-          <div class="filter-group">
-            <button class="btn btn-primary" type="button" onclick="loadRelieverSummary_(true)">⟳ Muat Ulang Reliever</button>
-          </div>
-        </div>
         <div id="relieverCards" class="cards"></div>
-        <div id="relieverBelumDigantikan" class="muted" style="margin-bottom:8px;"></div>
-        <div id="relieverTodayWrap" class="table-wrap"></div>
-        <details id="relieverRekapDetails" style="margin-top:12px;">
-          <summary id="relieverRekapSummary" style="cursor:pointer;font-weight:600;">Rekap periode</summary>
-          <div id="relieverRekapWrap" class="table-wrap" style="margin-top:8px;"></div>
-        </details>
-        <div class="panel-header" style="margin-top:14px;">
-          <h3>Matriks Reliever Periode Ini</h3>
-          <span class="muted">Isi sel = karyawan yang digantikan</span>
-        </div>
-        <div id="relieverMatrixWrap" class="table-wrap grid-wrap"></div>
-        <p class="muted" id="relieverHint" style="margin-top:8px;"></p>
+        <p class="muted" id="relieverHint" style="margin-top:4px;"></p>
       </div>
 
       <div class="chart-toolbar">
-        <div class="filter-group">
-          <label for="periodFilter">Periode:</label>
-          <select id="periodFilter" onchange="onPeriodFilterChange()"></select>
-        </div>
         <div class="filter-group">
           <label for="trenChartType">Jenis Grafik Tren:</label>
           <select id="trenChartType" onchange="onChartTypeChange()">
