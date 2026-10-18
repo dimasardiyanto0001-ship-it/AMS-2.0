@@ -60,6 +60,11 @@
   getJamKerjaSettings: ['token'],
   setJamKerjaSettings: ['settings', 'token'],
   addShiftJamKerja: ['kodeShift', 'label', 'jamMasuk', 'jamPulang', 'targetJam', 'token'],
+  getPolaShiftList: ['token'],
+  addPolaShift: ['namaPola', 'urutanKode', 'deskripsi', 'token'],
+  deletePolaShift: ['namaPola', 'token'],
+  assignPolaKaryawan: ['nama', 'polaAssigned', 'offsetHari', 'token'],
+  generateJadwalDariPola: ['mode', 'token'],
   generateAttendanceLogExcel: ['periodKey', 'employeeName', 'dayStart', 'dayEnd', 'token'],
   exportPdf: ['sheetName', 'token', 'department'],
   exportSheetPdf: ['sheetName', 'token', 'department'],
@@ -82,6 +87,7 @@
   verifyLoginReliever: ['nama'],
   searchReliverAbsen: ['query'],
   getKaryawanAbsenHariIni: [],
+  getRelieverSummary: ['token'],
   submitAbsenOnlineReliever: ['namaReliever', 'asalPerusahaan', 'namaDigantikan', 'jenisDigantikan', 'jenis', 'lat', 'lng', 'akurasi', 'fotoBase64'],
   getAuditLog: ['token', 'filter'],
   getNotifications: ['token'],
@@ -312,6 +318,7 @@ const TAB_TITLES_ = {
       .withSuccessHandler(data => {
         STATE = data;
         renderAll();
+        loadRelieverSummary_(!!showToast);
         if (showToast) toast('Data terbaru dimuat');
       })
       .withFailureHandler(err => {
@@ -320,6 +327,200 @@ const TAB_TITLES_ = {
       })
       .getAllData(SESSION.token, currentDeptFilter);
   }
+
+  /* ============ RELIEVER DI DASHBOARD ============ */
+
+  let RELIEVER_SUMMARY_ = null;
+  let relieverSummaryLoadedAt_ = 0;
+  let relieverSummaryLoading_ = false;
+  let relieverSummaryToken_ = null;
+  const RELIEVER_REFRESH_MS = 60000;
+
+  function setRelieverPanelVisible_(show) {
+    const p = document.getElementById('relieverPanel');
+    if (p) p.classList.toggle('hidden', !show);
+  }
+
+  /** Muat ringkasan reliever (maks 1x per 60 detik kecuali dipaksa). Gagal = panel disembunyikan, dashboard tetap jalan. */
+  function loadRelieverSummary_(force) {
+    if (!SESSION || currentViewPeriodKey !== 'active') { setRelieverPanelVisible_(false); return; }
+    if (relieverSummaryLoading_) return;
+    if (relieverSummaryToken_ !== SESSION.token) { RELIEVER_SUMMARY_ = null; relieverSummaryToken_ = SESSION.token; } // ganti akun = data lama dibuang
+    if (!force && RELIEVER_SUMMARY_ && Date.now() - relieverSummaryLoadedAt_ < RELIEVER_REFRESH_MS) { renderRelieverPanel_(); return; }
+    relieverSummaryLoading_ = true;
+    google.script.run
+      .withSuccessHandler(res => {
+        relieverSummaryLoading_ = false;
+        RELIEVER_SUMMARY_ = res;
+        relieverSummaryLoadedAt_ = Date.now();
+        renderRelieverPanel_();
+      })
+      .withFailureHandler(err => {
+        relieverSummaryLoading_ = false;
+        if (isAuthError_(err && err.message)) return;
+        showRelieverError_((err && err.message) || 'Terjadi kesalahan.');
+      })
+      .getRelieverSummary(SESSION.token);
+  }
+
+  function relieverStatusBadge_(status) {
+    if (status === 'Valid') return '<span style="color:#16a34a;font-weight:600;">Valid</span>';
+    if (status === 'Di Luar Radius') return '<span style="color:#dc2626;font-weight:600;">Di Luar Radius</span>';
+    return escapeHtml(status || '-');
+  }
+
+  function showRelieverError_(msg) {
+    setRelieverPanelVisible_(true);
+    const e = document.getElementById('relieverError');
+    if (e) { e.textContent = 'Data reliever gagal dimuat: ' + msg; e.classList.remove('hidden'); }
+    ['relieverCards', 'relieverBelumDigantikan', 'relieverTodayWrap', 'relieverMatrixWrap', 'relieverRekapWrap'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.innerHTML = '';
+    });
+  }
+
+  function onRelieverFilterChange() { renderRelieverPanel_(); }
+
+  function relieverMatch_(q, perusahaanFilter, perusahaan, teks) {
+    if (perusahaanFilter && String(perusahaan || '') !== perusahaanFilter) return false;
+    if (!q) return true;
+    return teks.join(' ').toLowerCase().indexOf(q) !== -1;
+  }
+
+  function fillRelieverPerusahaan_(s) {
+    const sel = document.getElementById('relieverPerusahaan');
+    if (!sel) return;
+    const set = {};
+    ((s.hariIni && s.hariIni.rows) || []).forEach(r => { if (r.perusahaan) set[r.perusahaan] = true; });
+    ((s.rekap && s.rekap.perReliever) || []).forEach(r => { if (r.perusahaan) set[r.perusahaan] = true; });
+    const list = Object.keys(set).sort();
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">Semua Perusahaan</option>' +
+      list.map(p => `<option value="${escapeHtml(p).replace(/"/g, '&quot;')}">${escapeHtml(p)}</option>`).join('');
+    if (list.indexOf(prev) !== -1) sel.value = prev;
+  }
+
+  function renderRelieverPanel_() {
+    const s = RELIEVER_SUMMARY_;
+    if (!s || currentViewPeriodKey !== 'active') { setRelieverPanelVisible_(false); return; }
+    setRelieverPanelVisible_(true);
+    const errEl = document.getElementById('relieverError');
+    if (errEl) errEl.classList.add('hidden');
+
+    fillRelieverPerusahaan_(s);
+    const q = String((document.getElementById('relieverSearch') || {}).value || '').trim().toLowerCase();
+    const pf = String((document.getElementById('relieverPerusahaan') || {}).value || '');
+    const filtering = !!(q || pf);
+
+    const h = s.hariIni || {};
+    const allRows = h.rows || [];
+    const rows = allRows.filter(r => relieverMatch_(q, pf, r.perusahaan, [r.reliever, r.menggantikan, r.perusahaan]));
+
+    document.getElementById('relieverTanggal').textContent = s.tanggal || '';
+
+    const uniq = {};
+    rows.forEach(r => { uniq[String(r.reliever).toLowerCase()] = true; });
+    const cards = [
+      { label: 'Reliever Hadir Hari Ini', value: Object.keys(uniq).length },
+      { label: 'Karyawan Digantikan', value: rows.length, sub: (!filtering && h.butuhPengganti !== null && h.butuhPengganti !== undefined) ? 'dari ' + h.butuhPengganti + ' yang A/I/S' : '' },
+      { label: 'Belum Pulang', value: rows.filter(r => r.jamMasuk && !r.jamPulang).length },
+      { label: 'Di Luar Radius', value: rows.filter(r => r.status === 'Di Luar Radius').length }
+    ];
+    cards[2].color = cards[2].value ? '#f59e0b' : '';
+    cards[3].color = cards[3].value ? '#ef4444' : '';
+    document.getElementById('relieverCards').innerHTML = cards.map(c => `
+      <div class="card">
+        <div class="card-label">${c.label}</div>
+        <div class="card-value"${c.color ? ` style="color:${c.color}"` : ''}>${c.value ?? '-'}</div>
+        ${c.sub ? `<div class="card-sub">${escapeHtml(c.sub)}</div>` : ''}
+      </div>`).join('');
+
+    const belum = filtering ? [] : (h.belumDigantikan || []);
+    document.getElementById('relieverBelumDigantikan').textContent = belum.length
+      ? 'Belum ada pengganti: ' + belum.map(k => k.nama + ' (' + k.jenis + ')').join(', ')
+      : '';
+
+    const wrap = document.getElementById('relieverTodayWrap');
+    if (!rows.length) {
+      wrap.innerHTML = '<p class="muted">' + (filtering ? 'Tidak ada data yang cocok dengan filter.' : 'Belum ada reliever yang absen hari ini.') + '</p>';
+    } else {
+      wrap.innerHTML = '<table><thead><tr><th>Reliever</th><th>Perusahaan</th><th>Menggantikan</th><th>Masuk</th><th>Pulang</th><th>Jarak</th><th>Status</th><th>Foto</th></tr></thead><tbody>' +
+        rows.map(r => `<tr>
+          <td>${escapeHtml(r.reliever)}</td>
+          <td>${escapeHtml(r.perusahaan)}</td>
+          <td>${escapeHtml(r.menggantikan)}${r.jenisDigantikan ? ' <span class="muted">(' + escapeHtml(r.jenisDigantikan) + ')</span>' : ''}</td>
+          <td>${escapeHtml(r.jamMasuk || '-')}</td>
+          <td>${escapeHtml(r.jamPulang || '-')}</td>
+          <td>${r.jarak === null || r.jarak === undefined ? '-' : escapeHtml(r.jarak) + ' m'}</td>
+          <td>${relieverStatusBadge_(r.status)}</td>
+          <td>${String(r.fotoUrl || '').indexOf('https:') === 0 ? '<a href="' + escapeHtml(r.fotoUrl).replace(/"/g, '&quot;') + '" target="_blank" rel="noopener">Lihat</a>' : '-'}</td>
+        </tr>`).join('') + '</tbody></table>';
+    }
+
+    const rk = s.rekap || {};
+    const sum = document.getElementById('relieverRekapSummary');
+    const rekapWrap = document.getElementById('relieverRekapWrap');
+    const perRel = (rk.perReliever || []).filter(r => relieverMatch_(q, pf, r.perusahaan, [r.nama, r.perusahaan]));
+    if (!rk.tersedia) {
+      sum.textContent = 'Rekap periode';
+      rekapWrap.innerHTML = '<p class="muted">Belum ada data rekap untuk periode aktif.</p>';
+    } else {
+      sum.textContent = 'Rekap periode ' + (s.periode || '') + ': ' +
+        perRel.reduce((a, r) => a + r.hari, 0) + ' hari penggantian oleh ' + perRel.filter(r => r.hari > 0).length + ' reliever';
+      rekapWrap.innerHTML = perRel.length
+        ? '<table><thead><tr><th>Reliever</th><th>Perusahaan</th><th>Jumlah Hari</th></tr></thead><tbody>' +
+          perRel.map(r => `<tr><td>${escapeHtml(r.nama)}</td><td>${escapeHtml(r.perusahaan)}</td><td>${r.hari}</td></tr>`).join('') + '</tbody></table>'
+        : '<p class="muted">Belum ada reliever yang tercatat pada periode ini.</p>';
+    }
+
+    renderRelieverMatrix_(rk, s.tanggal, q, pf);
+
+    const t = s.terdaftar || {};
+    document.getElementById('relieverHint').textContent =
+      'Reliever terdaftar: ' + (t.aktif ?? 0) + ' aktif dari ' + (t.total ?? 0) + '. Hanya reliever yang terdaftar di sheet DataReliever yang bisa absen.';
+  }
+
+  /** Matriks periode seperti tabel Realisasi: baris = reliever, kolom = tanggal, isi sel = karyawan yang digantikan. */
+  function renderRelieverMatrix_(rk, tanggal, q, pf) {
+    const wrap = document.getElementById('relieverMatrixWrap');
+    if (!wrap) return;
+    const rows = ((rk && rk.matriks) || []).filter(r => relieverMatch_(q || '', pf || '', r.perusahaan, [r.nama, r.perusahaan].concat(r.days || [])));
+    if (!rk || !rk.tersedia || !rows.length) {
+      wrap.innerHTML = '<p class="muted">Belum ada reliever yang tercatat pada periode ini.</p>';
+      return;
+    }
+    const dayCount = (rk.perHari || []).length;
+    const dayNames = rk.dayNames || [];
+    const todayNum = parseInt(String(tanggal || '').slice(8, 10), 10);
+    let html = '<table><thead><tr><th class="name-col">Nama Reliever</th><th>Perusahaan</th>';
+    for (let i = 0; i < dayCount; i++) {
+      const hl = (i + 1 === todayNum) ? ' style="background:#fef9c3"' : '';
+      html += `<th${hl}>${i + 1}<br><span class="muted">${escapeHtml(dayNames[i] || '')}</span></th>`;
+    }
+    html += '<th>Total</th></tr></thead><tbody>';
+    rows.forEach(r => {
+      let total = 0;
+      html += `<tr data-name="${escapeHtml((r.nama || '').toLowerCase())}"><td class="name-col">${escapeHtml(r.nama)}</td><td>${escapeHtml(r.perusahaan)}</td>`;
+      for (let i = 0; i < dayCount; i++) {
+        const v = (r.days && r.days[i]) || '';
+        if (v) {
+          total++;
+          const singkat = v.split(/\s+/)[0].substring(0, 7);
+          html += `<td class="day-cell" title="${escapeHtml(v).replace(/"/g, '&quot;')}" style="background:rgba(13,148,136,0.18);color:#0f766e;font-size:11px;">${escapeHtml(singkat)}</td>`;
+        } else {
+          html += '<td class="day-cell" style="color:#cbd5e1">·</td>';
+        }
+      }
+      html += `<td><b>${total}</b></td></tr>`;
+    });
+    const perHari = new Array(dayCount).fill(0);
+    let grand = 0;
+    rows.forEach(r => (r.days || []).forEach((v, i) => { if (v && i < dayCount) { perHari[i]++; grand++; } }));
+    html += '<tr><td class="name-col"><b>Jumlah per hari</b></td><td></td>';
+    for (let i = 0; i < dayCount; i++) html += `<td class="day-cell"><b>${perHari[i] || ''}</b></td>`;
+    html += `<td><b>${grand}</b></td></tr></tbody></table>`;
+    wrap.innerHTML = html;
+  }
+
   /* ============ ARSIP PERIODE ============ */
 
   function loadArchivedPeriodsList() {
@@ -463,6 +664,7 @@ function onDepartmentFilterChange() {
   }
 
   function loadArchivedData_(periodKey, showToast) {
+    setRelieverPanelVisible_(false); // data reliever hanya untuk periode aktif
     if (!SESSION) { showLoginGate(); return; }
     google.script.run
       .withSuccessHandler(data => {
