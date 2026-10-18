@@ -233,7 +233,6 @@ function submitAbsenOnlineReliever(namaReliever, asalPerusahaan, namaDigantikan,
   lat = Number(lat); lng = Number(lng);
 
   if (!namaReliever) throw new Error('Nama reliever wajib diisi.');
-  if (!asalPerusahaan) throw new Error('Asal perusahaan wajib diisi.');
   if (namaReliever.length > RELIEVER_FIELD_MAKS_ || asalPerusahaan.length > RELIEVER_FIELD_MAKS_) throw new Error('Nama atau perusahaan terlalu panjang.');
   if (!namaDigantikan) throw new Error('Wajib pilih karyawan yang digantikan.');
   if (jenis !== 'Masuk' && jenis !== 'Pulang') throw new Error('Jenis absen tidak valid.');
@@ -243,13 +242,17 @@ function submitAbsenOnlineReliever(namaReliever, asalPerusahaan, namaDigantikan,
   }
   if (!fotoBase64) throw new Error('Foto selfie wajib diambil sebelum absen.');
 
-  // Reliever mengetik nama & perusahaan sendiri (tidak dicek ke DataReliever, sesuai perubahan terbaru).
+  // Reliever WAJIB terdaftar di DataReliever dan aktif (aturan: terdaftar saja). Nama dan perusahaan
+  // dicatat sesuai DataReliever, bukan ketikan klien, supaya dashboard dan grid konsisten.
+  const terdaftar = verifyReliverByNama_(namaReliever);
+  namaReliever = String(terdaftar.nama).trim();
+  const perusahaan = String(terdaftar.perusahaan === null || terdaftar.perusahaan === undefined ? '' : terdaftar.perusahaan).trim() || asalPerusahaan;
+
   // Pengaman: karyawan yang digantikan harus benar-benar A/I/S hari ini; nama dicatat sesuai ejaan di Realisasi.
   const keyDigantikan = nameKey_(namaDigantikan);
   const cocok = bacaKaryawanAbsenRealisasi_().find(k => nameKey_(k.nama) === keyDigantikan);
   if (!cocok) throw new Error('Karyawan yang digantikan tidak berstatus Alfa/Izin/Sakit hari ini.');
   const dikenal = cocok.nama;
-  const perusahaan = asalPerusahaan;
 
   const lokasi = getSettingLokasiAbsen_();
   const jarak = haversineDistanceMeter_(lat, lng, lokasi.lat, lokasi.lng);
@@ -290,10 +293,173 @@ function submitAbsenOnlineReliever(namaReliever, asalPerusahaan, namaDigantikan,
 
     SpreadsheetApp.flush();
   }, 15000);
+  hapusCacheRelieverSummary_(now);
 
   const hasil = { status: status, jam: jamStr, jarak: jarak };
   if (periodeBelumDiganti) { hasil.periodeBelumDiganti = true; hasil.periode = namaPeriode; }
   return hasil;
+}
+
+/* ============================ RINGKASAN UNTUK DASHBOARD ============================ */
+
+const RELIEVER_SUMMARY_CACHE_DETIK_ = 60;
+const RELIEVER_LOG_BACA_MAKS_ = 1500;
+
+function relieverSummaryCacheKey_(now) {
+  return 'relieverSummary_v1_' + Utilities.formatDate(now, Session.getScriptTimeZone() || 'GMT+7', 'yyyyMMdd');
+}
+
+function hapusCacheRelieverSummary_(now) {
+  try { CacheService.getScriptCache().remove(relieverSummaryCacheKey_(now)); } catch (e) { /* cache hanya akselerasi */ }
+}
+
+function formatJamCell_(v, tz) {
+  if (v instanceof Date) return Utilities.formatDate(v, tz, 'HH:mm');
+  return String(v === null || v === undefined ? '' : v).trim();
+}
+
+/**
+ * Data reliever untuk Dashboard (hanya baca; tidak membuat atau mengarsipkan sheet apa pun).
+ * Perlu izin lihat menu Dashboard. Cache 60 detik, dihapus saat ada absen reliever baru.
+ * Hasil: { tanggal, periode, hariIni:{...}, rekap:{...} }.
+ */
+function getRelieverSummary(token) {
+  requireMenuAccess_(token, 'dashboard');
+  const now = new Date();
+  const key = relieverSummaryCacheKey_(now);
+  try {
+    const hit = CacheService.getScriptCache().get(key);
+    if (hit) return JSON.parse(hit);
+  } catch (e) { /* lanjut hitung */ }
+
+  const hasil = hitungRelieverSummary_(now);
+  try { CacheService.getScriptCache().put(key, JSON.stringify(hasil), RELIEVER_SUMMARY_CACHE_DETIK_); } catch (e) { /* abaikan */ }
+  return hasil;
+}
+
+function hitungRelieverSummary_(now) {
+  const ss = getSpreadsheet_();
+  const tz = Session.getScriptTimeZone() || 'GMT+7';
+  const hariKey = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+  const str = v => String(v === null || v === undefined ? '' : v).trim();
+
+  // --- DataReliever (daftar terdaftar) ---
+  const terdaftar = {};
+  let totalTerdaftar = 0, totalAktif = 0;
+  const dataSheet = ss.getSheetByName(CONFIG.SHEET_DATARELIEVER);
+  if (dataSheet && dataSheet.getLastRow() >= 2) {
+    dataSheet.getRange(2, 1, dataSheet.getLastRow() - 1, 4).getValues().forEach(r => {
+      const nama = str(r[0]);
+      if (!nama) return;
+      totalTerdaftar++;
+      const aktif = !isRelieverNonaktif_(r[3]);
+      if (aktif) totalAktif++;
+      terdaftar[nameKey_(nama)] = { nama: nama, perusahaan: str(r[1]), aktif: aktif };
+    });
+  }
+
+  // --- Log hari ini ---
+  const pasangan = {}; // reliever|digantikan -> baris ringkas
+  const logSheet = ss.getSheetByName(CONFIG.SHEET_LOGABSENRELIEVER);
+  if (logSheet && logSheet.getLastRow() >= 2) {
+    const last = logSheet.getLastRow();
+    const awal = Math.max(2, last - RELIEVER_LOG_BACA_MAKS_ + 1);
+    logSheet.getRange(awal, 1, last - awal + 1, 13).getValues().forEach(r => {
+      const ts = r[0];
+      if (!(ts instanceof Date) || isNaN(ts.getTime())) return;
+      if (Utilities.formatDate(ts, tz, 'yyyy-MM-dd') !== hariKey) return;
+      const nama = str(r[2]);
+      if (!nama) return;
+      const k = nameKey_(nama) + '|' + nameKey_(str(r[4]));
+      const jam = formatJamCell_(r[7], tz);
+      let p = pasangan[k];
+      if (!p) {
+        const info = terdaftar[nameKey_(nama)];
+        p = pasangan[k] = {
+          reliever: info ? info.nama : nama, perusahaan: info ? info.perusahaan : str(r[3]),
+          menggantikan: str(r[4]), jenisDigantikan: str(r[5]),
+          jamMasuk: '', jamPulang: '', status: '', jarak: null, fotoUrl: ''
+        };
+      }
+      const jenis = str(r[6]);
+      if (jenis === 'Masuk') {
+        if (!p.jamMasuk || jam < p.jamMasuk) {
+          p.jamMasuk = jam; p.status = str(r[11]);
+          p.jarak = isFinite(Number(r[10])) && r[10] !== '' ? Math.round(Number(r[10])) : null;
+          p.fotoUrl = str(r[12]);
+        }
+      } else if (jenis === 'Pulang') {
+        if (!p.jamPulang || jam > p.jamPulang) p.jamPulang = jam;
+      }
+    });
+  }
+  const rows = Object.keys(pasangan).map(k => pasangan[k])
+    .sort((a, b) => (a.jamMasuk || '99:99').localeCompare(b.jamMasuk || '99:99') || a.reliever.localeCompare(b.reliever));
+
+  const digantikanSet = {};
+  rows.forEach(r => { digantikanSet[nameKey_(r.menggantikan)] = true; });
+  let butuhPengganti = null;
+  let belumDigantikan = [];
+  try {
+    const absen = bacaKaryawanAbsenRealisasi_();
+    belumDigantikan = absen.filter(k => !digantikanSet[nameKey_(k.nama)]).map(k => ({ nama: k.nama, jenis: k.jenis }));
+    butuhPengganti = absen.length;
+  } catch (e) { butuhPengganti = null; }
+
+  const relieverSet = {};
+  rows.forEach(r => { relieverSet[nameKey_(r.reliever)] = true; });
+
+  // --- Rekap periode dari grid BackupReliever (hanya baca, hanya bila label = periode aktif) ---
+  let periode = '';
+  const rekap = { tersedia: false, totalHariKerja: 0, jumlahReliever: 0, perReliever: [], perHari: [], hariLabel: [], dayNames: [], matriks: [] };
+  const realisasiSheet = ss.getSheetByName(CONFIG.SHEET_REALISASI);
+  if (realisasiSheet) {
+    periode = str(realisasiSheet.getRange(2, 1).getValue());
+    const grid = ss.getSheetByName(CONFIG.SHEET_BACKUPRELIEVER);
+    if (grid && str(grid.getRange(2, 1).getValue()) === periode) {
+      const dayCount = getDayColCount_(realisasiSheet);
+      const lastRow = getLastEmployeeRow_(grid);
+      rekap.tersedia = true;
+      rekap.perHari = new Array(dayCount).fill(0);
+      for (let d = 1; d <= dayCount; d++) rekap.hariLabel.push(d);
+      if (dayCount > 0) rekap.dayNames = grid.getRange(CONFIG.DAY_NAME_ROW, CONFIG.FIRST_DAY_COL, 1, dayCount).getValues()[0].map(str);
+      const numRows = lastRow - CONFIG.DATA_START_ROW + 1;
+      if (numRows > 0 && dayCount > 0) {
+        const info = grid.getRange(CONFIG.DATA_START_ROW, 2, numRows, 2).getValues();
+        const isi = grid.getRange(CONFIG.DATA_START_ROW, CONFIG.FIRST_DAY_COL, numRows, dayCount).getValues();
+        for (let i = 0; i < numRows; i++) {
+          const nama = str(info[i][0]);
+          if (!nama) continue;
+          let hari = 0;
+          for (let d = 0; d < dayCount; d++) {
+            if (str(isi[i][d]) !== '') { hari++; rekap.perHari[d]++; }
+          }
+          const reg = terdaftar[nameKey_(nama)];
+          rekap.perReliever.push({ nama: nama, perusahaan: reg ? reg.perusahaan : str(info[i][1]), hari: hari });
+          rekap.matriks.push({ nama: nama, perusahaan: reg ? reg.perusahaan : str(info[i][1]), days: isi[i].map(str) });
+          rekap.totalHariKerja += hari;
+        }
+        rekap.perReliever.sort((a, b) => b.hari - a.hari || a.nama.localeCompare(b.nama));
+        rekap.jumlahReliever = rekap.perReliever.filter(r => r.hari > 0).length;
+      }
+    }
+  }
+
+  return {
+    tanggal: hariKey,
+    periode: periode,
+    terdaftar: { total: totalTerdaftar, aktif: totalAktif },
+    hariIni: {
+      jumlahReliever: Object.keys(relieverSet).length,
+      jumlahPenggantian: rows.length,
+      belumPulang: rows.filter(r => r.jamMasuk && !r.jamPulang).length,
+      diLuarRadius: rows.filter(r => r.status === 'Di Luar Radius').length,
+      butuhPengganti: butuhPengganti,
+      belumDigantikan: belumDigantikan,
+      rows: rows
+    },
+    rekap: rekap
+  };
 }
 
 /* ============================ ALAT BANTU (jalankan dari editor) ============================ */
