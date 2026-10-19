@@ -20,6 +20,16 @@
   status = 200
 
 [[redirects]]
+  from = "/izin"
+  to = "/izin.html"
+  status = 200
+
+[[redirects]]
+  from = "/FormIzin.html"
+  to = "/izin.html"
+  status = 301
+
+[[redirects]]
   from = "/AbsensiOnline.html"
   to = "/absensi-online.html"
   status = 301

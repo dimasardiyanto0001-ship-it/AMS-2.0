@@ -7,8 +7,8 @@
  *   AMS_TARGET=test node build.js   -> sama dengan --test (dipakai netlify.toml)
  *
  * Input  : index.html (sumber, masih berisi <?!= include('X'); ?>),
- *          Stylesheet.html, SettingJadwalKerja.html, JavaScript.html, AbsensiOnline.html
- * Output : public/index.html, public/absensi-online.html  (folder public/ yang dipublikasikan Netlify)
+ *          Stylesheet.html, SettingJadwalKerja.html, JavaScript.html, AbsensiOnline.html, FormIzin.html
+ * Output : public/index.html, public/absensi-online.html, public/izin.html  (folder public/ yang dipublikasikan Netlify)
  *
  * File sumber TIDAK diubah, jadi tetap bisa ditempel apa adanya ke editor Apps Script.
  */
@@ -71,7 +71,8 @@ function banner(html) {
 fs.mkdirSync(OUT, { recursive: true });
 const pages = [
   { src: 'index.html', out: 'index.html', inline: true },
-  { src: 'AbsensiOnline.html', out: 'absensi-online.html', inline: true }
+  { src: 'AbsensiOnline.html', out: 'absensi-online.html', inline: true },
+  { src: 'FormIzin.html', out: 'izin.html', inline: true }
 ];
 pages.forEach(function (p) {
   let html = read(p.src);

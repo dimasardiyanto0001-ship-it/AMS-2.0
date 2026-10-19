@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pengajuan Izin/Sakit/Cuti - AMS Housekeeping</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    background: linear-gradient(135deg, #1e3a8a, #2563eb);
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+  }
+  .card {
+    background: #fff; border-radius: 16px; padding: 32px;
+    max-width: 480px; width: 100%; box-shadow: 0 20px 50px rgba(0,0,0,.25);
+  }
+  h1 { font-size: 20px; color: #1e3a8a; margin: 0 0 2px; }
+  .sub { color: #64748b; font-size: 13px; margin: 0 0 20px; }
+  label { display: block; font-size: 13px; font-weight: 600; color: #334155; margin: 14px 0 5px; }
+  select, input, textarea {
+    width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px;
+    font-size: 14px; font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 70px; }
+  .row2 { display: flex; gap: 10px; }
+  .row2 > div { flex: 1; }
+  button {
+    width: 100%; margin-top: 22px; padding: 12px; border: none; border-radius: 8px;
+    background: #2563eb; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  button:disabled { opacity: .6; cursor: default; }
+  .msg { margin-top: 14px; padding: 10px 12px; border-radius: 8px; font-size: 13px; display: none; }
+  .msg.err { background: #fef2f2; color: #b91c1c; display: block; }
+  .msg.ok { background: #f0fdf4; color: #15803d; display: block; }
+  .hint { font-size: 11px; color: #94a3b8; margin-top: 4px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>📋 Pengajuan Izin / Sakit / Cuti</h1>
+    <p class="sub">Departemen Housekeeping — PT Swadharma Primautama</p>
+
+    <label>Nama</label>
+    <select id="fNama"><option value="">Memuat daftar nama...</option></select>
+
+    <label>NIK</label>
+    <input type="text" id="fNik" placeholder="Masukkan NIK Anda">
+    <div class="hint">NIK dipakai untuk verifikasi, harus sama persis dengan data di HR.</div>
+
+    <label>Jenis Pengajuan</label>
+    <select id="fJenis">
+      <option value="Izin">Izin</option>
+      <option value="Sakit">Sakit</option>
+      <option value="Cuti">Cuti</option>
+    </select>
+
+    <div class="row2">
+      <div>
+        <label>Tanggal Mulai</label>
+        <input type="date" id="fTglMulai">
+      </div>
+      <div>
+        <label>Tanggal Akhir</label>
+        <input type="date" id="fTglAkhir">
+      </div>
+    </div>
+
+    <label>Alasan</label>
+    <textarea id="fAlasan" placeholder="Jelaskan alasan pengajuan Anda"></textarea>
+
+    <label>Lampiran (wajib — mis. surat dokter untuk Sakit)</label>
+    <input type="file" id="fLampiran" accept="image/*,.pdf">
+    <div class="hint">Format: JPG, PNG, atau PDF. Maks ~5MB.</div>
+
+    <button id="btnSubmit" onclick="submitForm()">Kirim Pengajuan</button>
+    <div id="msgBox" class="msg"></div>
+  </div>
+
+<script>
+  // WAJIB DIISI: URL hasil Deploy > Manage deployments > Web app di Apps Script Editor.
+  const GAS_WEBAPP_URL_ = 'https://script.google.com/macros/s/AKfycbz4biHCLo-Dx7J10l0ZAR4G2coXZfbbEm2AyIPol8iLXkQ-rMl57TS5okJGaiG4BwsOuQ/exec';
+
+  function callGas_(action, body, onSuccess, onFailure) {
+    body.action = action;
+    fetch(GAS_WEBAPP_URL_, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(body)
+    })
+      .then(res => res.json())
+      .then(json => {
+        if (json.success) onSuccess(json.data);
+        else onFailure({ message: json.error || 'Terjadi kesalahan.' });
+      })
+      .catch(err => onFailure({ message: 'Gagal terhubung ke server: ' + err.message }));
+  }
+
+  function showMsg(text, isError) {
+    const box = document.getElementById('msgBox');
+    box.textContent = text;
+    box.className = 'msg ' + (isError ? 'err' : 'ok');
+  }
+
+  // Muat daftar nama karyawan utk dropdown
+  callGas_('getKaryawanForPublicForm', {}, list => {
+    const sel = document.getElementById('fNama');
+    if (!list || !list.length) {
+      sel.innerHTML = '<option value="">Tidak ada data karyawan</option>';
+      return;
+    }
+    sel.innerHTML = '<option value="">-- Pilih Nama --</option>';
+    list.forEach(n => {
+      const o = document.createElement('option');
+      o.value = n;
+      o.textContent = n;
+      sel.appendChild(o);
+    });
+  }, err => {
+    const sel = document.getElementById('fNama');
+    sel.innerHTML = '';
+    const o = document.createElement('option');
+    o.value = '';
+    o.textContent = 'Gagal memuat: ' + err.message;
+    sel.appendChild(o);
+  });
+
+  function submitForm() {
+    const nama = document.getElementById('fNama').value;
+    const nik = document.getElementById('fNik').value.trim();
+    const jenis = document.getElementById('fJenis').value;
+    const tglMulai = document.getElementById('fTglMulai').value;
+    const tglAkhir = document.getElementById('fTglAkhir').value;
+    const alasan = document.getElementById('fAlasan').value.trim();
+    const fileInput = document.getElementById('fLampiran');
+    const file = fileInput.files[0];
+
+    if (!nama) { showMsg('Pilih nama Anda terlebih dahulu.', true); return; }
+    if (!nik) { showMsg('NIK wajib diisi.', true); return; }
+    if (!tglMulai || !tglAkhir) { showMsg('Tanggal mulai dan akhir wajib diisi.', true); return; }
+    if (!alasan) { showMsg('Alasan wajib diisi.', true); return; }
+    if (!file) { showMsg('Lampiran wajib diupload.', true); return; }
+    if (file.size > 5 * 1024 * 1024) { showMsg('Ukuran file maksimal 5MB.', true); return; }
+
+    const btn = document.getElementById('btnSubmit');
+    btn.disabled = true;
+    btn.textContent = 'Mengirim...';
+    showMsg('', false);
+    document.getElementById('msgBox').className = 'msg';
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result.split(',')[1];
+      callGas_('submitPengajuanIzin', {
+        nama, nik, jenis, tglMulai, tglAkhir, alasan,
+        lampiranBase64: base64,
+        lampiranFilename: file.name,
+        lampiranMimeType: file.type
+      }, () => {
+        btn.disabled = false;
+        btn.textContent = 'Kirim Pengajuan';
+        showMsg('✅ Pengajuan berhasil dikirim! Menunggu persetujuan admin.', false);
+        document.getElementById('fNik').value = '';
+        document.getElementById('fTglMulai').value = '';
+        document.getElementById('fTglAkhir').value = '';
+        document.getElementById('fAlasan').value = '';
+        fileInput.value = '';
+      }, err => {
+        btn.disabled = false;
+        btn.textContent = 'Kirim Pengajuan';
+        showMsg('❌ ' + err.message, true);
+      });
+    };
+    reader.onerror = () => {
+      btn.disabled = false;
+      btn.textContent = 'Kirim Pengajuan';
+      showMsg('Gagal membaca file lampiran.', true);
+    };
+    reader.readAsDataURL(file);
+  }
+</script>
+</body>
+</html>
