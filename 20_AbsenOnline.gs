@@ -10,6 +10,13 @@
  * Dipakai juga oleh 24_BackupReliever.gs: getSettingLokasiAbsen_,
  * haversineDistanceMeter_, getOrCreateFotoAbsenBulanFolder_, dan
  * oleh 32_JadwalHariIni.gs: formatJam_.
+ *
+ * Perubahan terbaru:
+ *  - Absen di luar radius DITOLAK (tidak dicatat, foto tidak disimpan).
+ *  - Lokasi kantor yang belum diatur (0,0) ditolak dengan pesan jelas.
+ *  - Masuk ganda: jam Masuk PALING AWAL yang dipertahankan di JamScan.
+ *  - Pulang lintas tengah malam (mis. Masuk 22:00 -> Pulang 06:00):
+ *    JamScan & JamKerja ditulis ke kolom hari Masuk.
  *************************************************************/
 
 const SHEET_LOG_ABSEN_ONLINE = 'LogAbsenOnline';
@@ -21,6 +28,32 @@ const FOTO_PROFIL_ROOT_FOLDER_NAME_ = 'Foto Profil Karyawan - AMS Housekeeping';
 const RETENSI_FOTO_ABSEN_BULAN_ = 3;
 const FOTO_MAX_BYTES_ = 6 * 1024 * 1024;   // foto selfie/profil, setelah didekode
 const JAM_KERJA_MAKS_ = 16;                // durasi absen Masuk-Pulang di atas ini dianggap salah ketik, tidak ditulis ke JamKerja
+
+/* ============================ HELPER SPREADSHEET ============================ */
+
+/**
+ * Spreadsheet utama AMS. Diambil lewat sheet Realisasi (getSheet_ sudah dipakai di file ini),
+ * jadi tidak bergantung pada project terikat/standalone.
+ * Bila project sudah punya helper sendiri dengan nama lain, boleh diganti isinya agar memanggil helper itu.
+ */
+function getSpreadsheet_() {
+  return getSheet_(CONFIG.SHEET_REALISASI).getParent();
+}
+
+/**
+ * Jalankan SEKALI dari editor (pilih fungsi ini lalu Run) untuk melihat helper/konstanta
+ * yang dibutuhkan file ini tetapi belum ada di project. Hasil ada di Execution log.
+ */
+function cekDependensiAbsenOnline() {
+  const fungsi = ['getSheet_', 'getKaryawanMasterMap_', 'getOrCreateNikSheet_', 'withScriptLock_',
+    'parsePeriodMonthYear_', 'getLastEmployeeRow_', 'getDayColCount_', 'getOrSyncJamScanSheet_',
+    'getOrSyncJamKerjaSheet_', 'splitScanPair_', 'formatScanPair_'];
+  const objek = ['CONFIG', 'EMP_COL'];
+  const hilang = [];
+  fungsi.forEach(n => { try { if (typeof eval(n) !== 'function') hilang.push(n); } catch (e) { hilang.push(n); } });
+  objek.forEach(n => { try { if (typeof eval(n) !== 'object') hilang.push(n); } catch (e) { hilang.push(n); } });
+  Logger.log(hilang.length ? 'BELUM ADA di project: ' + hilang.join(', ') : 'Semua dependensi ada.');
+}
 
 /* ============================ LOKASI ============================ */
 
@@ -167,19 +200,22 @@ function simpanFotoAbsen_(nama, jenis, fotoBase64, now, tz) {
 
 /** Durasi (jam) antara dua jam "HH:mm"; keluar lebih awal dari masuk dianggap lewat tengah malam. */
 function hitungDurasiJamKerja_(masukStr, keluarStr) {
-  const toMinutes = s => {
-    const parts = String(s).split(':');
-    const h = parseInt(parts[0], 10) || 0;
-    const m = parseInt(parts[1], 10) || 0;
-    return h * 60 + m;
-  };
-  let diff = toMinutes(keluarStr) - toMinutes(masukStr);
+  let diff = menitDariJam_(keluarStr) - menitDariJam_(masukStr);
   if (diff < 0) diff += 24 * 60;
   return diff / 60;
 }
 
+/** "HH:mm" -> menit sejak 00:00. */
+function menitDariJam_(s) {
+  const parts = String(s).split(':');
+  const h = parseInt(parts[0], 10) || 0;
+  const m = parseInt(parts[1], 10) || 0;
+  return h * 60 + m;
+}
+
 /**
- * Catat absen Masuk/Pulang. Selalu masuk ke LogAbsenOnline (beserta foto).
+ * Catat absen Masuk/Pulang. Absen di luar radius DITOLAK (error, tidak ada yang dicatat).
+ * Absen valid selalu masuk ke LogAbsenOnline (beserta foto).
  * Ke Realisasi (+ JamScan, JamKerja) hanya bila periode aktif = bulan berjalan
  * dan karyawan ada di Realisasi: sel yang sudah S/I/C/A/1/2 tidak diubah.
  * Hasil: { status, jam, jarak [, periodeBelumDiganti, periode] }.
@@ -201,9 +237,16 @@ function submitAbsenOnline(nama, nik, jenis, lat, lng, akurasi, fotoBase64) {
 
   verifyKaryawanByNamaNik_(nama, nik);
 
+  // Cek lokasi SEBELUM foto disimpan / log ditulis: absen di luar radius tidak meninggalkan jejak.
   const lokasi = getSettingLokasiAbsen_();
+  if (!lokasi.lat && !lokasi.lng) {
+    throw new Error('Lokasi kantor belum diatur oleh admin.');
+  }
   const jarak = haversineDistanceMeter_(lat, lng, lokasi.lat, lokasi.lng);
-  const status = jarak <= lokasi.radius ? 'Valid' : 'Di Luar Radius';
+  if (jarak > lokasi.radius) {
+    throw new Error('Absen ditolak: Anda berada ' + jarak + ' m dari lokasi absen (maksimal ' + lokasi.radius + ' m).');
+  }
+  const status = 'Valid';
 
   const now = new Date();
   const tz = Session.getScriptTimeZone() || 'GMT+7';
@@ -249,13 +292,46 @@ function submitAbsenOnline(nama, nik, jenis, lat, lng, akurasi, fotoBase64) {
   return hasil;
 }
 
-/** Tulis Realisasi (=1 bila masih kosong), JamScan, dan JamKerja (saat Pulang) untuk hari ini. Dipanggil di dalam lock. */
+/**
+ * Tulis Realisasi (=1 bila masih kosong), JamScan, dan JamKerja (saat Pulang) untuk hari ini.
+ * Dipanggil di dalam lock.
+ *
+ * Aturan:
+ *  - Masuk ganda: jam Masuk PALING AWAL yang dipertahankan.
+ *  - Pulang berulang: jam Pulang TERAKHIR yang dipakai.
+ *  - Pulang lintas tengah malam: bila hari ini belum ada Masuk, tetapi kemarin ada Masuk
+ *    tanpa Pulang dan jam Pulang lebih kecil dari jam Masuk kemarin, maka Pulang & JamKerja
+ *    ditulis ke kolom hari kemarin, dan Realisasi hari ini tidak diubah.
+ */
 function tulisAbsenKeRekap_(realisasiSheet, rowNum, now, jenis, jamStr) {
   const dayCount = getDayColCount_(realisasiSheet);
   const dayIdx = now.getDate() - 1;
   if (dayIdx < 0 || dayIdx >= dayCount) return;
 
+  const ss = getSpreadsheet_();
+  let jamScanSheet = ss.getSheetByName(CONFIG.SHEET_JAMSCAN);
+  if (!jamScanSheet) jamScanSheet = getOrSyncJamScanSheet_();
+
   const col = CONFIG.FIRST_DAY_COL + dayIdx;
+  const scanCell = jamScanSheet.getRange(rowNum, col);
+  const existing = splitScanPair_(scanCell.getValue());
+
+  // --- Pulang lintas tengah malam ---
+  if (jenis === 'Pulang' && !existing.masuk && dayIdx > 0) {
+    const prevCol = col - 1;
+    const prevCell = jamScanSheet.getRange(rowNum, prevCol);
+    const prev = splitScanPair_(prevCell.getValue());
+    if (prev.masuk && !prev.keluar && menitDariJam_(jamStr) < menitDariJam_(prev.masuk)) {
+      const jam = hitungDurasiJamKerja_(prev.masuk, jamStr);
+      if (jam > 0 && jam <= JAM_KERJA_MAKS_) {
+        prevCell.setValue(formatScanPair_(prev.masuk, jamStr));
+        tulisJamKerja_(ss, rowNum, prevCol, jam);
+        return;
+      }
+    }
+  }
+
+  // --- Alur biasa (shift dalam satu hari) ---
   const currentVal = realisasiSheet.getRange(rowNum, col).getValue();
   const currentCode = (currentVal === null || currentVal === undefined) ? '' : String(currentVal).trim().toUpperCase();
   const isProtected = ['S', 'I', 'C', 'A'].includes(currentCode);
@@ -263,24 +339,22 @@ function tulisAbsenKeRekap_(realisasiSheet, rowNum, now, jenis, jamStr) {
     realisasiSheet.getRange(rowNum, col).setValue(1);
   }
 
-  const ss = getSpreadsheet_();
-  let jamScanSheet = ss.getSheetByName(CONFIG.SHEET_JAMSCAN);
-  if (!jamScanSheet) jamScanSheet = getOrSyncJamScanSheet_();
-  const scanCell = jamScanSheet.getRange(rowNum, col);
-  const existing = splitScanPair_(scanCell.getValue());
-  const masuk = jenis === 'Masuk' ? jamStr : existing.masuk;
+  const masuk = jenis === 'Masuk' ? (existing.masuk || jamStr) : existing.masuk;
   const keluar = jenis === 'Pulang' ? jamStr : existing.keluar;
   scanCell.setValue(formatScanPair_(masuk, keluar));
 
   // Jam kerja terhitung ditulis ke JamKerja saat absen Pulang (bila Masuk-nya ada).
   if (jenis === 'Pulang' && masuk && keluar) {
     const jam = hitungDurasiJamKerja_(masuk, keluar);
-    if (jam > 0 && jam <= JAM_KERJA_MAKS_) {
-      let jamKerjaSheet = ss.getSheetByName(CONFIG.SHEET_JAMKERJA);
-      if (!jamKerjaSheet) jamKerjaSheet = getOrSyncJamKerjaSheet_();
-      jamKerjaSheet.getRange(rowNum, col).setValue(Math.round(jam * 100) / 100);
-    }
+    if (jam > 0 && jam <= JAM_KERJA_MAKS_) tulisJamKerja_(ss, rowNum, col, jam);
   }
+}
+
+/** Tulis jam kerja (jam, dibulatkan 2 desimal) ke sheet JamKerja pada baris/kolom tertentu. */
+function tulisJamKerja_(ss, rowNum, col, jam) {
+  let jamKerjaSheet = ss.getSheetByName(CONFIG.SHEET_JAMKERJA);
+  if (!jamKerjaSheet) jamKerjaSheet = getOrSyncJamKerjaSheet_();
+  jamKerjaSheet.getRange(rowNum, col).setValue(Math.round(jam * 100) / 100);
 }
 
 /* ============================ RIWAYAT ============================ */
