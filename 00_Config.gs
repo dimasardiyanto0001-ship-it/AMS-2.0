@@ -104,6 +104,7 @@ const MENU_LIST = [
   { key: 'logabsensi',         label: 'Log Absensi' },
   { key: 'relieverdata',       label: 'Data Reliever' },
   { key: 'daftarkaryawan',     label: 'Daftar Karyawan' },
+  { key: 'daftarreliever',     label: 'Daftar Reliever' },
   { key: 'reportsummary',      label: 'Summary Report' },
   { key: 'reportdetail',       label: 'Detail Report' },
   { key: 'reportdept',         label: 'Department Report' },
