@@ -102,6 +102,7 @@ const MENU_LIST = [
   { key: 'input',              label: 'Input Realisasi' },
   { key: 'rekap',              label: 'Rekap Karyawan' },
   { key: 'logabsensi',         label: 'Log Absensi' },
+  { key: 'relieverdata',       label: 'Data Reliever' },
   { key: 'daftarkaryawan',     label: 'Daftar Karyawan' },
   { key: 'reportsummary',      label: 'Summary Report' },
   { key: 'reportdetail',       label: 'Detail Report' },
