@@ -88,6 +88,9 @@
   searchReliverAbsen: ['query'],
   getKaryawanAbsenHariIni: [],
   getRelieverSummary: ['token'],
+  getRelieverData: ['tglMulai', 'tglAkhir', 'token'],
+  exportRelieverExcel: ['tglMulai', 'tglAkhir', 'cari', 'token'],
+  exportRelieverPdf: ['tglMulai', 'tglAkhir', 'cari', 'token'],
   submitAbsenOnlineReliever: ['namaReliever', 'asalPerusahaan', 'namaDigantikan', 'jenisDigantikan', 'jenis', 'lat', 'lng', 'akurasi', 'fotoBase64'],
   getAuditLog: ['token', 'filter'],
   getNotifications: ['token'],
@@ -228,7 +231,7 @@ document.addEventListener('DOMContentLoaded', () => {
 const TAB_TITLES_ = {
   dashboard: 'Dashboard', jadwal: 'Jadwal Kerja', input: 'Input Realisasi',
   pengajuanizin: 'Pengajuan Izin', // ===== TAMBAHAN PENGAJUAN IZIN =====
-  rekap: 'Rekap Karyawan', logabsensi: 'Log Absensi', daftarkaryawan: 'Daftar Karyawan',
+  rekap: 'Rekap Karyawan', logabsensi: 'Log Absensi', relieverdata: 'Data Reliever', daftarkaryawan: 'Daftar Karyawan',
   reportsummary: 'Summary Report', reportdetail: 'Detail Report',
   reportdept: 'Department Report', reportexception: 'Exception Report',
   settingaccount: 'Setting - Account', settinghakakses: 'Setting - Hak Akses',
@@ -283,6 +286,7 @@ const TAB_TITLES_ = {
     if (tabName === 'settingassignjadwal') loadUnassignedEmployees_();
     if (tabName === 'settingauditlog') loadAuditLog_();
     if (tabName === 'settingjadwalkerja') sjkMuatDaftarPola();
+    if (tabName === 'relieverdata') initRelieverData_();
   }
 
   function openSidebar() {
@@ -2776,6 +2780,129 @@ function submitDeleteEmployee() {
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+
+  /* ============ DATA RELIEVER (menu sidebar: tabel + download Excel/PDF) ============ */
+
+  let RELIEVER_DATA_ROWS_ = [];
+  let relieverDataInited_ = false;
+  let relieverDataReq_ = 0; // penanda permintaan terbaru (respons lama diabaikan)
+
+  function relPad2_(n) { return (n < 10 ? '0' : '') + n; }
+  function relIsoHariIni_() {
+    const d = new Date();
+    return d.getFullYear() + '-' + relPad2_(d.getMonth() + 1) + '-' + relPad2_(d.getDate());
+  }
+  function relIsoAwalBulan_() {
+    const d = new Date();
+    return d.getFullYear() + '-' + relPad2_(d.getMonth() + 1) + '-01';
+  }
+  function relTglIndo_(iso) {
+    const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return m ? (m[3] + '/' + m[2] + '/' + m[1]) : String(iso || '');
+  }
+  function relAttr_(s) { return escapeHtml(s).replace(/"/g, '&quot;'); }
+
+  /** Dipanggil saat menu dibuka: isi rentang awal (tanggal 1 bulan ini s/d hari ini) lalu muat data. */
+  function initRelieverData_() {
+    if (!relieverDataInited_) {
+      document.getElementById('relDataDari').value = relIsoAwalBulan_();
+      document.getElementById('relDataSampai').value = relIsoHariIni_();
+      relieverDataInited_ = true;
+    }
+    loadRelieverData_();
+  }
+
+  function loadRelieverData_() {
+    if (!SESSION) { showLoginGate(); return; }
+    const dari = document.getElementById('relDataDari').value;
+    const sampai = document.getElementById('relDataSampai').value;
+    if (dari && sampai && dari > sampai) { toast('Rentang tanggal tidak valid', true); return; }
+
+    const info = document.getElementById('relDataInfo');
+    info.textContent = 'Memuat data reliever...';
+    const req = ++relieverDataReq_;
+
+    google.script.run
+      .withSuccessHandler(res => {
+        if (req !== relieverDataReq_) return;
+        RELIEVER_DATA_ROWS_ = (res && res.rows) || [];
+        renderRelieverData_();
+      })
+      .withFailureHandler(err => {
+        if (req !== relieverDataReq_) return;
+        RELIEVER_DATA_ROWS_ = [];
+        document.getElementById('relDataWrap').innerHTML = '';
+        info.textContent = 'Gagal memuat data reliever: ' + err.message;
+        toast('Gagal memuat data reliever: ' + err.message, true);
+      })
+      .getRelieverData(dari, sampai, SESSION.token);
+  }
+
+  function relieverDataFiltered_() {
+    const q = (document.getElementById('relDataCari').value || '').trim().toLowerCase();
+    if (!q) return RELIEVER_DATA_ROWS_;
+    return RELIEVER_DATA_ROWS_.filter(r =>
+      (String(r.reliever) + ' ' + String(r.perusahaan) + ' ' + String(r.menggantikan)).toLowerCase().indexOf(q) !== -1);
+  }
+
+  function renderRelieverData_() {
+    const wrap = document.getElementById('relDataWrap');
+    const info = document.getElementById('relDataInfo');
+    if (!wrap || !info) return;
+    const rows = relieverDataFiltered_();
+
+    const unik = {};
+    rows.forEach(r => { unik[String(r.reliever).toLowerCase()] = true; });
+    info.textContent = rows.length + ' baris · ' + Object.keys(unik).length + ' reliever';
+
+    if (!rows.length) {
+      wrap.innerHTML = '<p class="muted" style="padding:18px;text-align:center;">Tidak ada data reliever pada rentang tanggal ini.</p>';
+      return;
+    }
+    let html = '<table><thead><tr><th>No</th><th>Tanggal</th><th>Nama Reliever</th><th>Perusahaan</th>' +
+      '<th>Menggantikan</th><th>Keterangan</th><th>Masuk</th><th>Pulang</th><th>Jarak (m)</th><th>Status</th><th>Foto</th></tr></thead><tbody>';
+    rows.forEach((r, i) => {
+      const statusCls = (r.status === 'Di Luar Radius') ? 'rel-bad' : 'rel-ok';
+      const foto = /^https:\/\//.test(r.foto || '')
+        ? '<a href="' + relAttr_(r.foto) + '" target="_blank" rel="noopener">Lihat</a>' : '-';
+      html += '<tr><td>' + (i + 1) + '</td><td>' + escapeHtml(relTglIndo_(r.tanggal)) + '</td><td>' + escapeHtml(r.reliever) +
+        '</td><td>' + escapeHtml(r.perusahaan) + '</td><td>' + escapeHtml(r.menggantikan) + '</td><td>' + escapeHtml(r.keterangan) +
+        '</td><td>' + escapeHtml(r.jamMasuk || '-') + '</td><td>' + escapeHtml(r.jamPulang || '-') +
+        '</td><td>' + escapeHtml(r.jarak === '' || r.jarak === null || r.jarak === undefined ? '-' : r.jarak) +
+        '</td><td class="' + statusCls + '">' + escapeHtml(r.status) + '</td><td>' + foto + '</td></tr>';
+    });
+    wrap.innerHTML = html + '</tbody></table>';
+  }
+
+  function downloadRelieverData_(jenis) {
+    if (!SESSION) { showLoginGate(); return; }
+    if (!relieverDataFiltered_().length) { toast('Tidak ada data untuk diunduh', true); return; }
+    const dari = document.getElementById('relDataDari').value;
+    const sampai = document.getElementById('relDataSampai').value;
+    const cari = (document.getElementById('relDataCari').value || '').trim();
+
+    const isPdf = (jenis === 'pdf');
+    const btn = document.getElementById(isPdf ? 'relDataPdfBtn' : 'relDataExcelBtn');
+    const labelAsli = btn.textContent;
+    const label = isPdf ? 'PDF' : 'Excel';
+    btn.disabled = true;
+    btn.textContent = '⏳ Membuat ' + label + '...';
+
+    const run = google.script.run
+      .withSuccessHandler(result => {
+        btn.disabled = false;
+        btn.textContent = labelAsli;
+        triggerBase64Download(result.base64, result.filename, result.mimeType);
+        toast(label + ' berhasil dibuat: ' + result.filename);
+      })
+      .withFailureHandler(err => {
+        btn.disabled = false;
+        btn.textContent = labelAsli;
+        toast('Gagal membuat ' + label + ': ' + err.message, true);
+      });
+    if (isPdf) run.exportRelieverPdf(dari, sampai, cari, SESSION.token);
+    else run.exportRelieverExcel(dari, sampai, cari, SESSION.token);
   }
 
   /* ============ UTIL ============ */
