@@ -121,6 +121,9 @@ const ROUTES = {
   getKaryawanAbsenHariIni: { fn: 'getKaryawanAbsenHariIni', args: [], public: true },
   submitAbsenOnlineReliever: { fn: 'submitAbsenOnlineReliever', args: ['namaReliever', 'asalPerusahaan', 'namaDigantikan', 'jenisDigantikan', 'jenis', 'lat', 'lng', 'akurasi', 'fotoBase64'], public: true },
   getRelieverSummary: { fn: 'getRelieverSummary', args: ['token'] },
+  getRelieverData: { fn: 'getRelieverData', args: ['tglMulai', 'tglAkhir', 'token'] },
+  exportRelieverExcel: { fn: 'exportRelieverExcel', args: ['tglMulai', 'tglAkhir', 'cari', 'token'] },
+  exportRelieverPdf: { fn: 'exportRelieverPdf', args: ['tglMulai', 'tglAkhir', 'cari', 'token'] },
 
   /* ---- LAIN-LAIN ---- */
   getAuditLog: { fn: 'getAuditLog', args: ['token', 'filter'] },
