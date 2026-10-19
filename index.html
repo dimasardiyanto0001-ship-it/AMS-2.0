@@ -115,6 +115,7 @@
     </button>
     <div class="nav-submenu">
       <button class="tab-btn sub" data-tab="daftarkaryawan"><span class="tab-icon">🪪</span><span>Daftar Karyawan</span></button>
+      <button class="tab-btn sub" data-tab="daftarreliever"><span class="tab-icon">🤝</span><span>Daftar Reliever</span></button>
       <button class="tab-btn sub" data-tab="settingassignjadwal"><span class="tab-icon">🧩</span><span>Assign Karyawan ke Jadwal</span><span class="nav-badge hidden" id="assignJadwalBadge">0</span></button>
     </div>
   </div>
@@ -415,6 +416,39 @@
           </div>
           <button class="btn btn-excel" id="downloadLogBtn" onclick="downloadAttendanceLog()">⬇ Download Excel</button>
         </div>
+      </div>
+    </section>
+    <!-- ============ TAB: DAFTAR RELIEVER ============ -->
+    <section id="tab-daftarreliever" class="tab-content">
+      <div class="panel">
+        <div class="panel-header">
+          <h3>Daftar Reliever</h3>
+        </div>
+        <p class="muted">Reliever yang terdaftar dan berstatus Aktif bisa absen lewat halaman Absen Online (mode Reliever). Nama dipakai sebagai kunci, jadi tidak bisa diubah setelah didaftarkan. Reliever yang sudah tidak dipakai cukup dinonaktifkan.</p>
+        <div class="log-filter-row" id="relMasterForm">
+          <div class="filter-group">
+            <label for="relMasterNama">Nama Reliever:</label>
+            <input type="text" id="relMasterNama" maxlength="80" placeholder="Nama lengkap" autocomplete="off">
+          </div>
+          <div class="filter-group">
+            <label for="relMasterPerusahaan">Perusahaan:</label>
+            <select id="relMasterPerusahaan"><option value="">-- Pilih Perusahaan --</option></select>
+          </div>
+          <div class="filter-group">
+            <label for="relMasterHp">No HP:</label>
+            <input type="tel" id="relMasterHp" maxlength="20" placeholder="08xxxxxxxxxx" autocomplete="off">
+          </div>
+          <button class="btn btn-primary" type="button" id="relMasterSimpanBtn" onclick="simpanRelieverMaster_()">+ Tambah Reliever</button>
+          <button class="btn btn-ghost hidden" type="button" id="relMasterBatalBtn" onclick="batalEditRelieverMaster_()">Batal</button>
+        </div>
+        <div class="log-filter-row">
+          <div class="filter-group">
+            <label for="relMasterCari">Cari:</label>
+            <input type="text" id="relMasterCari" placeholder="Nama / perusahaan..." oninput="renderRelieverMaster_()">
+          </div>
+        </div>
+        <p class="muted" id="relMasterInfo" style="margin:12px 0 8px;"></p>
+        <div class="table-wrap" id="relMasterWrap"></div>
       </div>
     </section>
     <!-- ============ TAB: DATA RELIEVER ============ -->
