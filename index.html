@@ -104,6 +104,7 @@
       <button class="tab-btn sub" data-tab="input"><span class="tab-icon">✅</span><span>Input Realisasi</span></button>
       <button class="tab-btn sub" data-tab="rekap"><span class="tab-icon">📋</span><span>Rekap Karyawan</span></button>
       <button class="tab-btn sub" data-tab="logabsensi"><span class="tab-icon">🧾</span><span>Log Absensi</span></button>
+      <button class="tab-btn sub" data-tab="relieverdata"><span class="tab-icon">🤝</span><span>Data Reliever</span></button>
       <button class="tab-btn sub" data-tab="pengajuanizin"><span class="tab-icon">📝</span><span>Pengajuan Izin</span><span class="nav-badge hidden" id="pengajuanBadge">0</span></button>
     </div>
   </div>
@@ -414,6 +415,34 @@
           </div>
           <button class="btn btn-excel" id="downloadLogBtn" onclick="downloadAttendanceLog()">⬇ Download Excel</button>
         </div>
+      </div>
+    </section>
+    <!-- ============ TAB: DATA RELIEVER ============ -->
+    <section id="tab-relieverdata" class="tab-content">
+      <div class="panel">
+        <div class="panel-header">
+          <h3>Data Reliever</h3>
+        </div>
+        <p class="muted">Daftar reliever yang sudah absen Masuk, per tanggal. Pilih rentang tanggal (boleh lintas bulan), lalu unduh sebagai Excel atau PDF.</p>
+        <div class="log-filter-row">
+          <div class="filter-group">
+            <label for="relDataDari">Dari Tanggal:</label>
+            <input type="date" id="relDataDari">
+          </div>
+          <div class="filter-group">
+            <label for="relDataSampai">Sampai Tanggal:</label>
+            <input type="date" id="relDataSampai">
+          </div>
+          <div class="filter-group">
+            <label for="relDataCari">Cari:</label>
+            <input type="text" id="relDataCari" placeholder="Nama reliever / karyawan..." oninput="renderRelieverData_()">
+          </div>
+          <button class="btn btn-primary" type="button" onclick="loadRelieverData_()">Tampilkan</button>
+          <button class="btn btn-excel" type="button" id="relDataExcelBtn" onclick="downloadRelieverData_('excel')">⬇ Download Excel</button>
+          <button class="btn btn-pdf" type="button" id="relDataPdfBtn" onclick="downloadRelieverData_('pdf')">⬇ Download PDF</button>
+        </div>
+        <p class="muted" id="relDataInfo" style="margin:12px 0 8px;"></p>
+        <div class="table-wrap" id="relDataWrap"></div>
       </div>
     </section>
 <!--
