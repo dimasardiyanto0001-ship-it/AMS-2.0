@@ -314,11 +314,11 @@ const TAB_TITLES_ = {
       loadArchivedData_(currentViewPeriodKey, showToast);
       return;
     }
+    loadRelieverSummary_(!!showToast); // diminta bersamaan dengan data utama (tidak menunggu), supaya kartu reliever tidak telat
     google.script.run
       .withSuccessHandler(data => {
         STATE = data;
-        renderAll();
-        loadRelieverSummary_(!!showToast);
+        renderAll(); // renderAll juga menggambar panel reliever bila datanya sudah datang lebih dulu
         if (showToast) toast('Data terbaru dimuat');
       })
       .withFailureHandler(err => {
@@ -334,6 +334,7 @@ const TAB_TITLES_ = {
   let relieverSummaryLoadedAt_ = 0;
   let relieverSummaryLoading_ = false;
   let relieverSummaryToken_ = null;
+  let relieverBackendMissing_ = false; // true bila backend lama (route belum ada): panel disembunyikan, tidak diulang menggangu
   const RELIEVER_REFRESH_MS = 60000;
 
   function setRelieverPanelVisible_(show) {
@@ -346,19 +347,34 @@ const TAB_TITLES_ = {
     if (!SESSION || currentViewPeriodKey !== 'active') { setRelieverPanelVisible_(false); return; }
     if (relieverSummaryLoading_) return;
     if (relieverSummaryToken_ !== SESSION.token) { RELIEVER_SUMMARY_ = null; dashRange_ = null; relieverSummaryToken_ = SESSION.token; } // ganti akun = data lama dibuang
-    if (!force && RELIEVER_SUMMARY_ && Date.now() - relieverSummaryLoadedAt_ < RELIEVER_REFRESH_MS) { renderRelieverPanel_(); return; }
+    if (!force && RELIEVER_SUMMARY_ && Date.now() - relieverSummaryLoadedAt_ < RELIEVER_REFRESH_MS) { if (STATE) renderRelieverPanel_(); return; }
+    if (!RELIEVER_SUMMARY_ && !relieverBackendMissing_) {
+      // pemuatan pertama: tampilkan penanda, bukan panel kosong atau hilang
+      setRelieverPanelVisible_(true);
+      const c = document.getElementById('relieverCards');
+      if (c) c.innerHTML = '<p class="muted">Memuat data reliever...</p>';
+    }
     relieverSummaryLoading_ = true;
     google.script.run
       .withSuccessHandler(res => {
         relieverSummaryLoading_ = false;
+        relieverBackendMissing_ = false;
         RELIEVER_SUMMARY_ = res;
         relieverSummaryLoadedAt_ = Date.now();
-        renderRelieverPanel_();
+        if (STATE) renderRelieverPanel_(); // bila data utama belum datang, renderAll yang menggambarnya
       })
       .withFailureHandler(err => {
         relieverSummaryLoading_ = false;
-        if (isAuthError_(err && err.message)) return;
-        showRelieverError_((err && err.message) || 'Terjadi kesalahan.');
+        const msg = (err && err.message) || 'Terjadi kesalahan.';
+        if (isAuthError_(msg)) return;
+        if (msg.indexOf('Action tidak dikenal') !== -1) {
+          // Backend (Apps Script) pada deployment ini belum diperbarui: sembunyikan panel, jangan tampilkan galat.
+          relieverBackendMissing_ = true;
+          setRelieverPanelVisible_(false);
+          if (window.console) console.warn('Panel reliever disembunyikan: backend belum memuat getRelieverSummary. Perbarui 24_BackupReliever.gs dan 01_Router.gs lalu deploy versi baru.');
+          return;
+        }
+        showRelieverError_(msg);
       })
       .getRelieverSummary(SESSION.token);
   }
@@ -936,6 +952,7 @@ renderGrid('realisasiWrap', STATE.realisasi, STATE.dayCount, STATE.dayNames, STA
     renderRekapTable('rekapWrap', STATE.rekap, true);
     renderCharts();
     renderRankLists();
+    if (RELIEVER_SUMMARY_) renderRelieverPanel_();
     updateInputEditability();
     filterJadwalTable();
     filterRealisasiTable();
