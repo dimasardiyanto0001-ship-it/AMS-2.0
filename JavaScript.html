@@ -91,6 +91,10 @@
   getRelieverData: ['tglMulai', 'tglAkhir', 'token'],
   exportRelieverExcel: ['tglMulai', 'tglAkhir', 'cari', 'token'],
   exportRelieverPdf: ['tglMulai', 'tglAkhir', 'cari', 'token'],
+  getRelieverMaster: ['token'],
+  addReliever: ['nama', 'perusahaan', 'noHp', 'token'],
+  updateReliever: ['nama', 'perusahaan', 'noHp', 'token'],
+  setRelieverStatus: ['nama', 'status', 'token'],
   submitAbsenOnlineReliever: ['namaReliever', 'asalPerusahaan', 'namaDigantikan', 'jenisDigantikan', 'jenis', 'lat', 'lng', 'akurasi', 'fotoBase64'],
   getAuditLog: ['token', 'filter'],
   getNotifications: ['token'],
@@ -231,7 +235,7 @@ document.addEventListener('DOMContentLoaded', () => {
 const TAB_TITLES_ = {
   dashboard: 'Dashboard', jadwal: 'Jadwal Kerja', input: 'Input Realisasi',
   pengajuanizin: 'Pengajuan Izin', // ===== TAMBAHAN PENGAJUAN IZIN =====
-  rekap: 'Rekap Karyawan', logabsensi: 'Log Absensi', relieverdata: 'Data Reliever', daftarkaryawan: 'Daftar Karyawan',
+  rekap: 'Rekap Karyawan', logabsensi: 'Log Absensi', relieverdata: 'Data Reliever', daftarkaryawan: 'Daftar Karyawan', daftarreliever: 'Daftar Reliever',
   reportsummary: 'Summary Report', reportdetail: 'Detail Report',
   reportdept: 'Department Report', reportexception: 'Exception Report',
   settingaccount: 'Setting - Account', settinghakakses: 'Setting - Hak Akses',
@@ -287,6 +291,7 @@ const TAB_TITLES_ = {
     if (tabName === 'settingauditlog') loadAuditLog_();
     if (tabName === 'settingjadwalkerja') sjkMuatDaftarPola();
     if (tabName === 'relieverdata') initRelieverData_();
+    if (tabName === 'daftarreliever') loadRelieverMaster_();
   }
 
   function openSidebar() {
@@ -2903,6 +2908,165 @@ function submitDeleteEmployee() {
       });
     if (isPdf) run.exportRelieverPdf(dari, sampai, cari, SESSION.token);
     else run.exportRelieverExcel(dari, sampai, cari, SESSION.token);
+  }
+
+  /* ============ DAFTAR RELIEVER (master) ============ */
+
+  let RELIEVER_MASTER_ROWS_ = [];
+  let relMasterEditNama_ = null; // null = mode tambah; terisi = sedang ubah reliever tersebut
+  let relMasterReq_ = 0;
+
+  function relMasterCanEdit_() {
+    return !!SESSION && !!MY_PERMISSIONS_.edit && MY_PERMISSIONS_.edit.indexOf('daftarreliever') !== -1;
+  }
+
+  function loadRelieverMaster_() {
+    if (!SESSION) { showLoginGate(); return; }
+    const form = document.getElementById('relMasterForm');
+    if (form) form.classList.toggle('hidden', !relMasterCanEdit_());
+    const info = document.getElementById('relMasterInfo');
+    info.textContent = 'Memuat daftar reliever...';
+    const req = ++relMasterReq_;
+    ensureDaftarKaryawanLoaded_(() => isiDropdownPerusahaanReliever_(''));
+
+    google.script.run
+      .withSuccessHandler(res => {
+        if (req !== relMasterReq_) return;
+        RELIEVER_MASTER_ROWS_ = (res && res.rows) || [];
+        renderRelieverMaster_();
+      })
+      .withFailureHandler(err => {
+        if (req !== relMasterReq_) return;
+        RELIEVER_MASTER_ROWS_ = [];
+        document.getElementById('relMasterWrap').innerHTML = '';
+        info.textContent = 'Gagal memuat daftar reliever: ' + err.message;
+        toast('Gagal memuat daftar reliever: ' + err.message, true);
+      })
+      .getRelieverMaster(SESSION.token);
+  }
+
+  function renderRelieverMaster_() {
+    const wrap = document.getElementById('relMasterWrap');
+    const info = document.getElementById('relMasterInfo');
+    if (!wrap || !info) return;
+    const q = (document.getElementById('relMasterCari').value || '').trim().toLowerCase();
+    const rows = !q ? RELIEVER_MASTER_ROWS_ : RELIEVER_MASTER_ROWS_.filter(r =>
+      (String(r.nama) + ' ' + String(r.perusahaan)).toLowerCase().indexOf(q) !== -1);
+    const aktif = RELIEVER_MASTER_ROWS_.filter(r => r.status === 'Aktif').length;
+    info.textContent = RELIEVER_MASTER_ROWS_.length + ' reliever terdaftar · ' + aktif + ' aktif';
+
+    if (!rows.length) {
+      wrap.innerHTML = '<p class="muted" style="padding:18px;text-align:center;">' +
+        (RELIEVER_MASTER_ROWS_.length ? 'Tidak ada reliever yang cocok.' : 'Belum ada reliever terdaftar.') + '</p>';
+      return;
+    }
+    const canEdit = relMasterCanEdit_();
+    let html = '<table><thead><tr><th>No</th><th>Nama Reliever</th><th>Perusahaan</th><th>No HP</th><th>Status</th>' +
+      (canEdit ? '<th>Aksi</th>' : '') + '</tr></thead><tbody>';
+    rows.forEach((r, i) => {
+      const aktifRow = (r.status === 'Aktif');
+      html += '<tr><td>' + (i + 1) + '</td><td>' + escapeHtml(r.nama) + '</td><td>' + escapeHtml(r.perusahaan) +
+        '</td><td>' + escapeHtml(r.noHp || '-') + '</td><td class="' + (aktifRow ? 'rel-ok' : 'rel-bad') + '">' + escapeHtml(r.status) + '</td>';
+      if (canEdit) {
+        html += '<td><button class="btn btn-ghost" type="button" data-nama="' + relAttr_(r.nama) + '" onclick="editRelieverMaster_(this)">Ubah</button> ' +
+          '<button class="btn btn-ghost" type="button" data-nama="' + relAttr_(r.nama) + '" data-status="' + (aktifRow ? 'Nonaktif' : 'Aktif') +
+          '" onclick="ubahStatusRelieverMaster_(this)">' + (aktifRow ? 'Nonaktifkan' : 'Aktifkan') + '</button></td>';
+      }
+      html += '</tr>';
+    });
+    wrap.innerHTML = html + '</tbody></table>';
+  }
+
+  /** Isi dropdown Perusahaan dari daftar Department (Daftar Karyawan). Nilai lama yang tidak ada di daftar tetap ditampilkan saat ubah. */
+  function isiDropdownPerusahaanReliever_(pilih) {
+    const sel = document.getElementById('relMasterPerusahaan');
+    if (!sel) return;
+    const dipilih = (pilih === undefined || pilih === null) ? sel.value : String(pilih);
+    const daftar = getUniqueDepartmentsList_();
+    if (dipilih && daftar.indexOf(dipilih) === -1) daftar.push(dipilih);
+    sel.innerHTML = '<option value="">-- Pilih Perusahaan --</option>' +
+      daftar.map(d => '<option value="' + relAttr_(d) + '">' + escapeHtml(d) + '</option>').join('');
+    sel.value = dipilih;
+  }
+
+  function relMasterResetForm_() {
+    relMasterEditNama_ = null;
+    document.getElementById('relMasterNama').value = '';
+    document.getElementById('relMasterNama').disabled = false;
+    isiDropdownPerusahaanReliever_('');
+    document.getElementById('relMasterHp').value = '';
+    document.getElementById('relMasterSimpanBtn').textContent = '+ Tambah Reliever';
+    document.getElementById('relMasterBatalBtn').classList.add('hidden');
+  }
+
+  function batalEditRelieverMaster_() { relMasterResetForm_(); }
+
+  function editRelieverMaster_(btn) {
+    const nama = btn.getAttribute('data-nama');
+    const r = RELIEVER_MASTER_ROWS_.find(x => x.nama === nama);
+    if (!r) return;
+    relMasterEditNama_ = r.nama;
+    const namaEl = document.getElementById('relMasterNama');
+    namaEl.value = r.nama;
+    namaEl.disabled = true; // nama = kunci, tidak boleh diubah
+    isiDropdownPerusahaanReliever_(r.perusahaan);
+    document.getElementById('relMasterHp').value = r.noHp;
+    document.getElementById('relMasterSimpanBtn').textContent = 'Simpan Perubahan';
+    document.getElementById('relMasterBatalBtn').classList.remove('hidden');
+    document.getElementById('relMasterPerusahaan').focus();
+  }
+
+  function simpanRelieverMaster_() {
+    if (!SESSION) { showLoginGate(); return; }
+    const nama = (document.getElementById('relMasterNama').value || '').trim();
+    const perusahaan = (document.getElementById('relMasterPerusahaan').value || '').trim();
+    const hp = (document.getElementById('relMasterHp').value || '').trim();
+    if (!nama) { toast('Nama reliever wajib diisi', true); return; }
+    if (!perusahaan) { toast('Pilih Perusahaan dari daftar', true); return; }
+
+    const editing = relMasterEditNama_ !== null;
+    const btn = document.getElementById('relMasterSimpanBtn');
+    const labelAsli = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ Menyimpan...';
+
+    const run = google.script.run
+      .withSuccessHandler(res => {
+        btn.disabled = false;
+        RELIEVER_MASTER_ROWS_ = (res && res.rows) || [];
+        relMasterResetForm_();
+        renderRelieverMaster_();
+        toast(editing ? 'Data reliever diperbarui' : 'Reliever "' + nama + '" didaftarkan');
+      })
+      .withFailureHandler(err => {
+        btn.disabled = false;
+        btn.textContent = labelAsli;
+        toast('Gagal menyimpan: ' + err.message, true);
+      });
+    if (editing) run.updateReliever(relMasterEditNama_, perusahaan, hp, SESSION.token);
+    else run.addReliever(nama, perusahaan, hp, SESSION.token);
+  }
+
+  function ubahStatusRelieverMaster_(btn) {
+    if (!SESSION) { showLoginGate(); return; }
+    const nama = btn.getAttribute('data-nama');
+    const status = btn.getAttribute('data-status');
+    const pesan = status === 'Nonaktif'
+      ? 'Nonaktifkan reliever "' + nama + '"? Ia tidak bisa absen lewat Absen Online sampai diaktifkan lagi.'
+      : 'Aktifkan kembali reliever "' + nama + '"?';
+    if (!confirm(pesan)) return;
+    btn.disabled = true;
+    google.script.run
+      .withSuccessHandler(res => {
+        RELIEVER_MASTER_ROWS_ = (res && res.rows) || [];
+        renderRelieverMaster_();
+        toast('Status "' + nama + '" menjadi ' + status);
+      })
+      .withFailureHandler(err => {
+        btn.disabled = false;
+        toast('Gagal mengubah status: ' + err.message, true);
+      })
+      .setRelieverStatus(nama, status, SESSION.token);
   }
 
   /* ============ UTIL ============ */
