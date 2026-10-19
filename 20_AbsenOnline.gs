@@ -31,14 +31,12 @@ const JAM_KERJA_MAKS_ = 16;                // durasi absen Masuk-Pulang di atas 
 
 /* ============================ HELPER SPREADSHEET ============================ */
 
-/**
- * Spreadsheet utama AMS. Diambil lewat sheet Realisasi (getSheet_ sudah dipakai di file ini),
- * jadi tidak bergantung pada project terikat/standalone.
- * Bila project sudah punya helper sendiri dengan nama lain, boleh diganti isinya agar memanggil helper itu.
+/*
+ * CATATAN: getSpreadsheet_() SENGAJA TIDAK didefinisikan lagi di file ini. Fungsi itu sudah ada di
+ * 02_SheetUtils.gs. Versi lama di sini (getSheet_(...).getParent()) bentrok dengan versi 02_SheetUtils:
+ * file ini dimuat belakangan sehingga menimpanya, lalu getSheet_ <-> getSpreadsheet_ saling memanggil
+ * tanpa henti ("RangeError: Maximum call stack size exceeded") dan login/semua fitur gagal.
  */
-function getSpreadsheet_() {
-  return getSheet_(CONFIG.SHEET_REALISASI).getParent();
-}
 
 /**
  * Jalankan SEKALI dari editor (pilih fungsi ini lalu Run) untuk melihat helper/konstanta
