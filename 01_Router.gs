@@ -124,6 +124,10 @@ const ROUTES = {
   getRelieverData: { fn: 'getRelieverData', args: ['tglMulai', 'tglAkhir', 'token'] },
   exportRelieverExcel: { fn: 'exportRelieverExcel', args: ['tglMulai', 'tglAkhir', 'cari', 'token'] },
   exportRelieverPdf: { fn: 'exportRelieverPdf', args: ['tglMulai', 'tglAkhir', 'cari', 'token'] },
+  getRelieverMaster: { fn: 'getRelieverMaster', args: ['token'] },
+  addReliever: { fn: 'addReliever', args: ['nama', 'perusahaan', 'noHp', 'token'] },
+  updateReliever: { fn: 'updateReliever', args: ['nama', 'perusahaan', 'noHp', 'token'] },
+  setRelieverStatus: { fn: 'setRelieverStatus', args: ['nama', 'status', 'token'] },
 
   /* ---- LAIN-LAIN ---- */
   getAuditLog: { fn: 'getAuditLog', args: ['token', 'filter'] },
