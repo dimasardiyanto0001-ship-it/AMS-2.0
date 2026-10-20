@@ -37,6 +37,18 @@ function requireSuperAdmin_(token, pesanError) {
   return session;
 }
 
+/** True jika role = "Admin" (supervisor). Role lama huruf kecil "admin" sudah dipetakan ke Super Admin. */
+function isAdminRole_(rawRole) {
+  return normalizeRoleKey_(resolveRoleName_(rawRole)) === 'admin';
+}
+
+/** Upload realisasi / finger: boleh Super Admin dan Admin (supervisor). */
+function requireUploadAccess_(token, pesanError) {
+  const session = verifySession_(token);
+  if (isSuperAdminRole_(session.role) || isAdminRole_(session.role)) return session;
+  throw new Error(pesanError);
+}
+
 /* ============================ SHEET ROLES & PERMISSIONS ============================ */
 
 const ROLE_DESC_ = {

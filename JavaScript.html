@@ -2608,12 +2608,16 @@ function submitDeleteEmployee() {
 
   /* ============ UPLOAD REALISASI (EXCEL) ============ */
 
+  function canUploadRealisasiFinger_() {
+    return !!SESSION && (SESSION.role === 'Super Admin' || SESSION.role === 'Admin');
+  }
+
   function triggerRealisasiUpload() {
     if (currentViewPeriodKey !== 'active') {
       toast('Sedang melihat data arsip, tidak bisa upload realisasi. Pilih "Periode Aktif" dulu.', true);
       return;
     }
-    if (!SESSION || SESSION.role !== 'Super Admin') {
+    if (!canUploadRealisasiFinger_()) {
       toast('Hanya admin yang boleh upload realisasi', true);
       return;
     }
@@ -2679,7 +2683,7 @@ function submitDeleteEmployee() {
       toast('Sedang melihat data arsip, tidak bisa upload absen finger. Pilih "Periode Aktif" dulu.', true);
       return;
     }
-    if (!SESSION || SESSION.role !== 'Super Admin') {
+    if (!canUploadRealisasiFinger_()) {
       toast('Hanya admin yang boleh upload absen finger', true);
       return;
     }
