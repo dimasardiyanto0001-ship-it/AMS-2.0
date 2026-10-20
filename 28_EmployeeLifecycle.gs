@@ -17,7 +17,7 @@ function assignmentStatusOf_(rawValue) {
 /* ============================ TAMBAH ============================ */
 
 function addEmployee(nama, jabatan, nik, department, token) {
-  const session = requireSuperAdmin_(token, 'Hanya akun dengan role "Super Admin" yang boleh menambah karyawan.');
+  const session = requireUploadAccess_(token, 'Hanya akun dengan role "Super Admin" atau "Admin" yang boleh menambah karyawan.');
   nama = String(nama || '').trim();
   jabatan = String(jabatan || '').trim();
   nik = String(nik || '').trim();
@@ -167,7 +167,7 @@ function renumberEmployeeNoColumn_(sheet) {
  * mengenali pesan itu untuk menampilkan tombol "Hapus Paksa".
  */
 function deleteEmployee(nama, token, force) {
-  const session = requireSuperAdmin_(token, 'Hanya akun dengan role "Super Admin" yang boleh menghapus karyawan.');
+  const session = requireUploadAccess_(token, 'Hanya akun dengan role "Super Admin" atau "Admin" yang boleh menghapus karyawan.');
   nama = String(nama || '').trim();
   if (!nama) throw new Error('Nama karyawan tidak boleh kosong.');
 
@@ -214,7 +214,7 @@ function deleteEmployee(nama, token, force) {
 
 /** Hapus PERMANEN dari DataKaryawan, hanya yang berstatus Belum Terjadwal (yang lain dilewati). */
 function deleteUnassignedEmployee(namaList, token) {
-  const session = requireSuperAdmin_(token, 'Hanya akun dengan role "Super Admin" yang boleh menghapus karyawan.');
+  const session = requireUploadAccess_(token, 'Hanya akun dengan role "Super Admin" atau "Admin" yang boleh menghapus karyawan.');
   if (!namaList || !namaList.length) throw new Error('Tidak ada karyawan yang dipilih untuk dihapus.');
 
   const namaSet = new Set(namaList.map(n => nameKey_(n)));
