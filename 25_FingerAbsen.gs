@@ -13,7 +13,7 @@ const FINGER_PROTECTED_CODES_ = ['S', 'I', 'C', 'A'];
 const UPLOAD_ERR_FINGER_ = 'Gagal membaca file absen. Pastikan file berformat .xls / .xlsx yang valid dari mesin finger.';
 
 function uploadFingerAbsen(base64Data, filename, token) {
-  requireSuperAdmin_(token, 'Hanya akun dengan role "Super Admin" yang boleh upload data absen finger.');
+  requireUploadAccess_(token, 'Hanya akun dengan role "Super Admin" atau "Admin" yang boleh upload data absen finger.');
   if (!base64Data) throw new Error('File tidak ditemukan / kosong.');
   filename = filename || 'upload_finger.xls';
 

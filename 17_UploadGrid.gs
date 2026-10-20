@@ -21,15 +21,18 @@ function uploadJadwal(base64Data, filename, token) {
 
 function uploadRealisasi(base64Data, filename, token) {
   return uploadGridFile_(token, base64Data, filename || 'upload_realisasi.xlsx', {
-    roleError: 'Hanya akun dengan role "Super Admin" yang boleh upload realisasi.',
+    roleError: 'Hanya akun dengan role "Super Admin" atau "Admin" yang boleh upload realisasi.',
     sheetName: CONFIG.SHEET_REALISASI,
     validCodes: () => CONFIG.STATUS_CODES,
-    auditAction: 'Upload Realisasi'
+    auditAction: 'Upload Realisasi',
+    allowAdmin: true
   });
 }
 
 function uploadGridFile_(token, base64Data, filename, opts) {
-  const session = requireSuperAdmin_(token, opts.roleError);
+  const session = opts.allowAdmin
+    ? requireUploadAccess_(token, opts.roleError)
+    : requireSuperAdmin_(token, opts.roleError);
   if (!base64Data) throw new Error('File tidak ditemukan / kosong.');
 
   const applyResult = withTempSpreadsheet_(base64Data, filename, '_TEMP_UPLOAD_', MIME_XLSX_, UPLOAD_ERR_XLSX_, fileId => {
