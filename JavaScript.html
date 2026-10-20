@@ -4004,8 +4004,12 @@ function startPengajuanBadgePolling_() {
   pengajuanBadgePollTimer = setInterval(loadPengajuanBadgeCount_, 60000);
 }
 
+function canManagePengajuan_() {
+  return !!SESSION && (SESSION.role === 'Super Admin' || SESSION.role === 'Admin');
+}
+
 function loadPengajuanBadgeCount_() {
-  if (!SESSION || SESSION.role !== 'Super Admin') return;
+  if (!canManagePengajuan_()) return;
   google.script.run
     .withSuccessHandler(res => {
       const badge = document.getElementById('pengajuanBadge');
@@ -4040,7 +4044,7 @@ function ensurePengajuanWrapListener_() {
  * tombol "Coba Lagi" — TIDAK PERNAH dibiarkan macet di "Memuat...".
  */
 function loadPengajuanList_() {
-  if (!SESSION || SESSION.role !== 'Super Admin') return;
+  if (!canManagePengajuan_()) return;
   ensurePengajuanWrapListener_();
   const wrap = document.getElementById('pengajuanWrap');
   if (wrap) wrap.innerHTML = '<p class="muted">⏳ Memuat daftar pengajuan...</p>';

@@ -80,9 +80,9 @@ function parsePengajuanYmd_(str) {
   return { y: y, m: mo, d: d };
 }
 
-/** Super Admin saja (kebijakan lama modul ini, tidak lewat matrix Hak Akses). */
+/** Super Admin dan Admin (supervisor); tidak lewat matrix Hak Akses. */
 function requirePengajuanAdmin_(token, pesan) {
-  return requireSuperAdmin_(token, pesan);
+  return requireUploadAccess_(token, pesan);
 }
 
 /* ============================ PUBLIK (TANPA LOGIN) ============================ */
@@ -334,7 +334,7 @@ function rejectPengajuan(id, catatan, token) {
 /** Jumlah pengajuan Pending (badge notifikasi sidebar). Non-admin: 0. */
 function getPengajuanPendingCount(token) {
   const session = verifySession_(token);
-  if (!isSuperAdminRole_(session.role)) return { count: 0 };
+  if (!isSuperAdminRole_(session.role) && !isAdminRole_(session.role)) return { count: 0 };
 
   const sheet = getOrCreatePengajuanSheet_();
   const lastRow = sheet.getLastRow();
