@@ -576,12 +576,46 @@ function muatDaftarMenggantikan_() {
     const aksi = CURRENT_MODE === 'reliever' ? 'getRiwayatAbsenReliever' : 'getRiwayatAbsen';
     const param = CURRENT_MODE === 'reliever' ? { nama: CURRENT_NAMA } : { nik: CURRENT_NIK };
     callGas_(aksi, param, rows => {
-      RIWAYAT_CACHE = rows || [];
+      RIWAYAT_CACHE = ringkasRiwayat_(rows || []);
       renderRiwayat();
       hitungStatistik_();
     }, err => {
       document.getElementById('riwayatListHome').innerHTML = '<div class="empty">Gagal memuat: ' + err.message + '</div>';
       document.getElementById('riwayatListFull').innerHTML = '<div class="empty">Gagal memuat: ' + err.message + '</div>';
+    });
+  }
+
+  /**
+   * Ringkas riwayat: per hari hanya satu Masuk (jam paling awal) dan satu Pulang (jam paling akhir).
+   * Reliever dikelompokkan juga per karyawan yang digantikan. Hasil diurutkan terbaru di atas.
+   */
+  function ringkasRiwayat_(rows) {
+    const menit = j => {
+      const m = /^(\d{1,2})[:.](\d{2})/.exec(String(j || '').trim());
+      return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+    };
+    const kunciTgl = t => {
+      const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(t || '').trim());
+      return m ? Number(m[3]) * 10000 + Number(m[2]) * 100 + Number(m[1]) : 0;
+    };
+    const terpilih = {};
+    rows.forEach(r => {
+      if (r.jenis !== 'Masuk' && r.jenis !== 'Pulang') return;
+      const k = [r.tanggal, r.jenis, r.menggantikan || ''].join('|');
+      const cur = terpilih[k];
+      if (!cur) { terpilih[k] = r; return; }
+      const a = menit(r.jam), b = menit(cur.jam);
+      if (r.jenis === 'Masuk') {
+        if ((a === null ? Infinity : a) < (b === null ? Infinity : b)) terpilih[k] = r;
+      } else {
+        if ((a === null ? -Infinity : a) > (b === null ? -Infinity : b)) terpilih[k] = r;
+      }
+    });
+    return Object.keys(terpilih).map(k => terpilih[k]).sort((x, y) => {
+      const d = kunciTgl(y.tanggal) - kunciTgl(x.tanggal);
+      if (d !== 0) return d;
+      const mx = menit(x.jam), my = menit(y.jam);
+      return (my === null ? -1 : my) - (mx === null ? -1 : mx);
     });
   }
 

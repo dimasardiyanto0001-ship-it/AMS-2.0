@@ -302,7 +302,7 @@ function submitAbsenOnlineReliever(namaReliever, asalPerusahaan, namaDigantikan,
 
 /* ============================ RIWAYAT ABSEN RELIEVER (PUBLIK) ============================ */
 
-const RELIEVER_RIWAYAT_MAKS_ = 100;
+const RELIEVER_RIWAYAT_MAKS_ = 300;
 
 /**
  * Riwayat absen satu reliever (terbaru dulu), untuk halaman Absensi Online mode Reliever.
