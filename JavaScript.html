@@ -924,9 +924,10 @@ function onDepartmentFilterChange() {
     const uploadFingerBtn = document.getElementById('uploadFingerBtn');
     if (uploadFingerBtn) uploadFingerBtn.disabled = isArchiveView;
     const addEmployeeBtn = document.getElementById('addEmployeeBtn');
-    if (addEmployeeBtn) addEmployeeBtn.classList.toggle('hidden', !canEditJadwal);
+    const canManageEmp = canManageEmployee_() && !isArchiveView;
+    if (addEmployeeBtn) addEmployeeBtn.classList.toggle('hidden', !canManageEmp);
     const deleteEmployeeBtn = document.getElementById('deleteEmployeeBtn');
-    if (deleteEmployeeBtn) deleteEmployeeBtn.classList.toggle('hidden', !canEditJadwal);
+    if (deleteEmployeeBtn) deleteEmployeeBtn.classList.toggle('hidden', !canManageEmp);
     const canArchive = !!SESSION && SESSION.role === 'Super Admin' && !isArchiveView;
 
     const archiveBtn = document.getElementById('archiveBtn');
@@ -2036,7 +2037,7 @@ function renderAvgJamKerjaSparkline_() {
       toast('Sedang melihat data arsip, tidak bisa tambah karyawan. Pilih "Periode Aktif" dulu.', true);
       return;
     }
-    if (!SESSION || SESSION.role !== 'Super Admin') {
+    if (!canManageEmployee_()) {
       toast('Hanya admin yang boleh menambah karyawan', true);
       return;
     }
@@ -2173,7 +2174,7 @@ function openDeleteEmployeePicker() {
     toast('Sedang melihat data arsip, tidak bisa hapus karyawan. Pilih "Periode Aktif" dulu.', true);
     return;
   }
-  if (!SESSION || SESSION.role !== 'Super Admin') {
+  if (!canManageEmployee_()) {
     toast('Hanya admin yang boleh menghapus karyawan', true);
     return;
   }
@@ -3841,7 +3842,7 @@ function tambahShiftBaru() {
       .assignEmployeeToJadwal(selected, SESSION.token);
   }
   function submitDeleteUnassignedSelected_() {
-  if (!SESSION || SESSION.role !== 'Super Admin') { toast('Hanya admin yang boleh melakukan hapus', true); return; }
+  if (!canManageEmployee_()) { toast('Hanya admin yang boleh melakukan hapus', true); return; }
   const selected = Array.from(document.querySelectorAll('.assign-jadwal-chk:checked')).map(el => el.value);
   if (!selected.length) { toast('Pilih minimal 1 karyawan terlebih dahulu', true); return; }
   if (!confirm('Hapus permanen ' + selected.length + ' karyawan dari Daftar Karyawan? Tindakan ini tidak bisa dibatalkan.')) return;
@@ -4002,6 +4003,10 @@ function startPengajuanBadgePolling_() {
   loadPengajuanBadgeCount_();
   if (pengajuanBadgePollTimer) clearInterval(pengajuanBadgePollTimer);
   pengajuanBadgePollTimer = setInterval(loadPengajuanBadgeCount_, 60000);
+}
+
+function canManageEmployee_() {
+  return !!SESSION && (SESSION.role === 'Super Admin' || SESSION.role === 'Admin');
 }
 
 function canManagePengajuan_() {
