@@ -2610,7 +2610,7 @@ function submitDeleteEmployee() {
   /* ============ UPLOAD REALISASI (EXCEL) ============ */
 
   function canUploadRealisasiFinger_() {
-    return !!SESSION && (SESSION.role === 'Super Admin' || SESSION.role === 'Admin');
+    return !!SESSION && (SESSION.role === 'Super Admin' || String(SESSION.role || '').trim().toLowerCase() === 'admin');
   }
 
   function triggerRealisasiUpload() {
@@ -4006,11 +4006,11 @@ function startPengajuanBadgePolling_() {
 }
 
 function canManageEmployee_() {
-  return !!SESSION && (SESSION.role === 'Super Admin' || SESSION.role === 'Admin');
+  return !!SESSION && (SESSION.role === 'Super Admin' || String(SESSION.role || '').trim().toLowerCase() === 'admin');
 }
 
 function canManagePengajuan_() {
-  return !!SESSION && (SESSION.role === 'Super Admin' || SESSION.role === 'Admin');
+  return !!SESSION && (SESSION.role === 'Super Admin' || String(SESSION.role || '').trim().toLowerCase() === 'admin');
 }
 
 function loadPengajuanBadgeCount_() {
