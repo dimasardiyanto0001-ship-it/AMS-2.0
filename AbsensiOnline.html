@@ -232,6 +232,7 @@
 </div>
 
 <button class="btn-primary" id="btnLogin" onclick="doLogin()">Masuk</button>
+<p style="margin:22px 0 0;text-align:center;font-size:11px;line-height:1.5;color:rgba(255,255,255,.55)">© 2026 AMS · Dikembangkan oleh Dimas Ardiyanto</p>
   </div>
 </div>
 
@@ -322,6 +323,7 @@
       <div class="info-row"><span class="k">Jadwal Kerja</span><span class="v" id="profilJadwal">-</span></div>
     </div>
     <button class="btn-logout" onclick="doLogout()">Keluar</button>
+    <p style="margin:18px 0 0;text-align:center;font-size:11px;line-height:1.5;color:#94a3b8">© 2026 AMS · Dikembangkan oleh Dimas Ardiyanto</p>
   </div>
 
   <div id="msgBox" class="msg"></div>
@@ -444,6 +446,10 @@ let CURRENT_PERUSAHAAN = '';
 }
 function masukKeHome_() {
   const initial = CURRENT_NAMA.trim().charAt(0).toUpperCase();
+  RIWAYAT_CACHE = [];
+  ['riwayatListHome', 'riwayatListFull'].forEach(id => { document.getElementById(id).innerHTML = '<div class="empty">Memuat riwayat...</div>'; });
+  document.getElementById('statHadir').textContent = '-';
+  document.getElementById('statTerlambat').textContent = '-';
 
   document.getElementById('screenLogin').style.display = 'none';
   document.getElementById('bottomNav').classList.add('show');
@@ -466,10 +472,11 @@ function masukKeHome_() {
   if (CURRENT_MODE === 'reliever') {
     document.querySelector('.home-header .role').textContent = CURRENT_PERUSAHAAN || 'Reliever';
     document.getElementById('profilNik').textContent = '-';
-    navRiwayat.style.display = 'none';
+    navRiwayat.style.display = '';
     document.getElementById('scheduleCardAsli').style.display = 'none';
     document.getElementById('relieverCard').style.display = 'block';
     muatDaftarMenggantikan_();
+    muatRiwayat();
   } else {
     navRiwayat.style.display = '';
     document.getElementById('scheduleCardAsli').style.display = 'block';
@@ -548,7 +555,9 @@ function muatDaftarMenggantikan_() {
   }
 
   function muatRiwayat() {
-    callGas_('getRiwayatAbsen', { nik: CURRENT_NIK }, rows => {
+    const aksi = CURRENT_MODE === 'reliever' ? 'getRiwayatAbsenReliever' : 'getRiwayatAbsen';
+    const param = CURRENT_MODE === 'reliever' ? { nama: CURRENT_NAMA } : { nik: CURRENT_NIK };
+    callGas_(aksi, param, rows => {
       RIWAYAT_CACHE = rows || [];
       renderRiwayat();
       document.getElementById('statHadir').textContent = RIWAYAT_CACHE.filter(r => r.jenis === 'Masuk').length;
@@ -557,6 +566,10 @@ function muatDaftarMenggantikan_() {
       document.getElementById('riwayatListHome').innerHTML = '<div class="empty">Gagal memuat: ' + err.message + '</div>';
       document.getElementById('riwayatListFull').innerHTML = '<div class="empty">Gagal memuat: ' + err.message + '</div>';
     });
+  }
+
+  function escHtml_(t) {
+    return String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
   function renderItem(r) {
@@ -569,6 +582,7 @@ function muatDaftarMenggantikan_() {
             <span class="jenisjam">${r.jenis} — ${r.jam}</span>
             <span class="badge ${r.status === 'Valid' ? 'ok' : 'warn'}">${r.status}</span>
           </div>
+          ${r.menggantikan ? '<div class="tgl">Menggantikan ' + escHtml_(r.menggantikan) + '</div>' : ''}
         </div>
       </div>`;
   }
@@ -659,6 +673,7 @@ function muatDaftarMenggantikan_() {
               btn.disabled = false; btn.textContent = teksAsli;
               if (data.status === 'Valid') showMsg(`✅ Absen reliever ${jenis} berhasil pukul ${data.jam}.`, 'ok');
               else showMsg(`⚠️ Absen tercatat, di luar radius (${data.jarak}m).`, 'warn');
+              muatRiwayat();
             },
             err => { btn.disabled = false; btn.textContent = teksAsli; showMsg('❌ ' + err.message, 'err'); }
           );
@@ -704,6 +719,5 @@ function muatDaftarMenggantikan_() {
   fNamaSuggest.classList.remove('show');
 }
 </script>
-<div style="text-align:center;font-size:11px;color:#94a3b8;padding:14px 16px 24px;line-height:1.5">© 2026 AMS · Dikembangkan oleh Dimas Ardiyanto</div>
 </body>
 </html>

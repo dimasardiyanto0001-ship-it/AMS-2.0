@@ -300,6 +300,43 @@ function submitAbsenOnlineReliever(namaReliever, asalPerusahaan, namaDigantikan,
   return hasil;
 }
 
+/* ============================ RIWAYAT ABSEN RELIEVER (PUBLIK) ============================ */
+
+const RELIEVER_RIWAYAT_MAKS_ = 100;
+
+/**
+ * Riwayat absen satu reliever (terbaru dulu), untuk halaman Absensi Online mode Reliever.
+ * Reliever harus terdaftar dan aktif. Hanya membaca; tidak membuat sheet.
+ * Hasil: [{ tanggal, jenis, jam, status, menggantikan }] (maks RELIEVER_RIWAYAT_MAKS_ entri).
+ */
+function getRiwayatAbsenReliever(nama) {
+  const terdaftar = verifyReliverByNama_(nama);
+  const key = nameKey_(terdaftar.nama);
+
+  const sheet = getSpreadsheet_().getSheetByName(CONFIG.SHEET_LOGABSENRELIEVER);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+
+  const last = sheet.getLastRow();
+  const awal = Math.max(2, last - RELIEVER_LOG_BACA_MAKS_ + 1);
+  const rows = sheet.getRange(awal, 1, last - awal + 1, 13).getValues();
+
+  const out = [];
+  for (let i = rows.length - 1; i >= 0 && out.length < RELIEVER_RIWAYAT_MAKS_; i--) {
+    const r = rows[i];
+    if (nameKey_(r[2] === null || r[2] === undefined ? '' : r[2]) !== key) continue;
+    const jenis = String(r[6] || '').trim();
+    if (jenis !== 'Masuk' && jenis !== 'Pulang') continue;
+    out.push({
+      tanggal: formatTanggalAbsen_(r[1]),
+      jenis: jenis,
+      jam: formatJam_(r[7]),
+      status: String(r[11] || '').trim(),
+      menggantikan: String(r[4] || '').trim()
+    });
+  }
+  return out;
+}
+
 /* ============================ RINGKASAN UNTUK DASHBOARD ============================ */
 
 const RELIEVER_SUMMARY_CACHE_DETIK_ = 60;

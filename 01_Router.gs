@@ -119,6 +119,7 @@ const ROUTES = {
   verifyLoginReliever: { fn: 'verifyLoginReliever', args: ['nama'], public: true },
   searchReliverAbsen: { fn: 'searchReliverUntukAbsen', args: ['query'], public: true },
   getKaryawanAbsenHariIni: { fn: 'getKaryawanAbsenHariIni', args: [], public: true },
+  getRiwayatAbsenReliever: { fn: 'getRiwayatAbsenReliever', args: ['nama'], public: true },
   submitAbsenOnlineReliever: { fn: 'submitAbsenOnlineReliever', args: ['namaReliever', 'asalPerusahaan', 'namaDigantikan', 'jenisDigantikan', 'jenis', 'lat', 'lng', 'akurasi', 'fotoBase64'], public: true },
   getRelieverSummary: { fn: 'getRelieverSummary', args: ['token'] },
   getRelieverData: { fn: 'getRelieverData', args: ['tglMulai', 'tglAkhir', 'token'] },
