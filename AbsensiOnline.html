@@ -168,6 +168,14 @@
   }
   .info-row .k { color: var(--muted); }
   .info-row .v { font-weight: 600; }
+  .avatar, .profil-avatar { overflow: hidden; }
+  .avatar img, .profil-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .avatar { cursor: pointer; }
+  .btn-ubahfoto {
+    display: block; margin: 12px auto 0; padding: 8px 16px; border-radius: 999px; border: 1.5px solid var(--line);
+    background: #fff; color: var(--navy); font-weight: 700; font-size: 12.5px; cursor: pointer; font-family: 'Inter';
+  }
+  .btn-ubahfoto:disabled { opacity: .6; cursor: default; }
   .btn-logout {
     margin: 24px 18px 0; width: calc(100% - 36px); padding: 13px; border-radius: 12px; border: 1.5px solid #FCA5A5;
     background: #fff; color: #DC2626; font-weight: 700; font-size: 14px; cursor: pointer; font-family: 'Inter';
@@ -248,9 +256,9 @@
         <div>
           <p class="greet-label" id="greetLabel">Selamat Pagi,</p>
           <p class="greet-name" id="greetName">-</p>
-          <p class="role">Departemen Housekeeping</p>
+          <p class="role" id="roleHeader">Departemen Housekeeping</p>
         </div>
-        <div class="avatar" id="avatarInit">-</div>
+        <div class="avatar" id="avatarInit" onclick="goTab('Profil')">-</div>
       </div>
     </div>
 
@@ -286,7 +294,7 @@
   </div>
 </div>
     <div class="stats-row">
-      <div class="stat-card"><div class="num" id="statHadir">-</div><div class="lbl2">Hadir bulan ini</div></div>
+      <div class="stat-card"><div class="num" id="statHadir">-</div><div class="lbl2">Hadir periode ini</div></div>
       <div class="stat-card"><div class="num" id="statTerlambat">-</div><div class="lbl2">Di luar radius</div></div>
     </div>
 
@@ -315,11 +323,13 @@
     <div class="profil-head">
       <div class="profil-avatar" id="profilAvatar">-</div>
       <div class="nm" id="profilNama">-</div>
-      <div class="dept">Departemen Housekeeping</div>
+      <div class="dept" id="profilDept">Departemen Housekeeping</div>
+      <button type="button" class="btn-ubahfoto" id="btnUbahFoto" onclick="document.getElementById('inputFotoProfil').click()">📷 Ubah Foto Profil</button>
+      <input type="file" accept="image/*" id="inputFotoProfil" style="display:none;">
     </div>
     <div class="info-list">
       <div class="info-row"><span class="k">NIK</span><span class="v" id="profilNik">-</span></div>
-      <div class="info-row"><span class="k">Perusahaan</span><span class="v">PT Swadharma Primautama</span></div>
+      <div class="info-row"><span class="k">Perusahaan</span><span class="v" id="profilPerusahaan">PT Swadharma Primautama</span></div>
       <div class="info-row"><span class="k">Jadwal Kerja</span><span class="v" id="profilJadwal">-</span></div>
     </div>
     <button class="btn-logout" onclick="doLogout()">Keluar</button>
@@ -352,6 +362,7 @@
   let CURRENT_NAMA = '', CURRENT_NIK = '', RIWAYAT_CACHE = [], ACTIVE_FILTER = 'Semua';
 let CURRENT_MODE = 'karyawan';
 let CURRENT_PERUSAHAAN = '';
+let CURRENT_PERUSAHAAN_KARYAWAN = '', CURRENT_FOTO_URL = '', PERIODE_AKTIF = null;
   function callGas_(action, body, onSuccess, onFailure) {
     body.action = action;
     fetch(GAS_WEBAPP_URL_, {
@@ -436,9 +447,11 @@ let CURRENT_PERUSAHAAN = '';
   if (!nik) { showMsg('NIK wajib diisi.', 'err'); btn.disabled = false; btn.textContent = teksAsli; return; }
 
   callGas_('verifyLoginAbsenOnline', { nama, nik },
-    () => {
+    data => {
       btn.disabled = false; btn.textContent = teksAsli;
       CURRENT_NAMA = nama; CURRENT_NIK = nik;
+      CURRENT_PERUSAHAAN_KARYAWAN = (data && data.department && data.department !== '-') ? String(data.department).trim() : '';
+      CURRENT_FOTO_URL = (data && data.fotoProfilUrl) ? String(data.fotoProfilUrl).trim() : '';
       masukKeHome_();
     },
     err => { btn.disabled = false; btn.textContent = teksAsli; showMsg('❌ ' + err.message, 'err'); }
@@ -454,9 +467,15 @@ function masukKeHome_() {
   document.getElementById('screenLogin').style.display = 'none';
   document.getElementById('bottomNav').classList.add('show');
   document.getElementById('greetName').textContent = CURRENT_NAMA;
-  document.getElementById('avatarInit').textContent = initial;
   document.getElementById('profilNama').textContent = CURRENT_NAMA;
-  document.getElementById('profilAvatar').textContent = initial;
+  const namaPerusahaan = CURRENT_MODE === 'reliever' ? (CURRENT_PERUSAHAAN || 'Reliever') : (CURRENT_PERUSAHAAN_KARYAWAN || 'Departemen Housekeeping');
+  document.getElementById('roleHeader').textContent = namaPerusahaan;
+  document.getElementById('profilDept').textContent = namaPerusahaan;
+  document.getElementById('profilPerusahaan').textContent = CURRENT_MODE === 'reliever' ? (CURRENT_PERUSAHAAN || '-') : (CURRENT_PERUSAHAAN_KARYAWAN || 'PT Swadharma Primautama');
+  document.getElementById('btnUbahFoto').style.display = CURRENT_MODE === 'reliever' ? 'none' : '';
+  setAvatar_(CURRENT_MODE === 'reliever' ? '' : CURRENT_FOTO_URL);
+  PERIODE_AKTIF = null;
+  callGas_('getPeriodeAktif', {}, p => { PERIODE_AKTIF = p; hitungStatistik_(); }, () => { PERIODE_AKTIF = null; });
 
   const hour = new Date().getHours();
   document.getElementById('greetLabel').textContent =
@@ -470,7 +489,6 @@ function masukKeHome_() {
   const navRiwayat = document.querySelector('.navbtn[data-tab="Riwayat"]');
 
   if (CURRENT_MODE === 'reliever') {
-    document.querySelector('.home-header .role').textContent = CURRENT_PERUSAHAAN || 'Reliever';
     document.getElementById('profilNik').textContent = '-';
     navRiwayat.style.display = '';
     document.getElementById('scheduleCardAsli').style.display = 'none';
@@ -560,13 +578,81 @@ function muatDaftarMenggantikan_() {
     callGas_(aksi, param, rows => {
       RIWAYAT_CACHE = rows || [];
       renderRiwayat();
-      document.getElementById('statHadir').textContent = RIWAYAT_CACHE.filter(r => r.jenis === 'Masuk').length;
-      document.getElementById('statTerlambat').textContent = RIWAYAT_CACHE.filter(r => r.status !== 'Valid').length;
+      hitungStatistik_();
     }, err => {
       document.getElementById('riwayatListHome').innerHTML = '<div class="empty">Gagal memuat: ' + err.message + '</div>';
       document.getElementById('riwayatListFull').innerHTML = '<div class="empty">Gagal memuat: ' + err.message + '</div>';
     });
   }
+
+  /** Kartu statistik hanya menghitung absen pada periode aktif (bulan/tahun Realisasi), bukan seluruh riwayat. */
+  function hitungStatistik_() {
+    const now = new Date();
+    const tahun = PERIODE_AKTIF ? Number(PERIODE_AKTIF.tahun) : now.getFullYear();
+    const bulan = PERIODE_AKTIF ? Number(PERIODE_AKTIF.bulan) : now.getMonth() + 1;
+    const dalamPeriode = r => {
+      const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(r.tanggal || '').trim());
+      return !!m && Number(m[3]) === tahun && Number(m[2]) === bulan;
+    };
+    const aktif = RIWAYAT_CACHE.filter(dalamPeriode);
+    const hariHadir = new Set(aktif.filter(r => r.jenis === 'Masuk').map(r => r.tanggal));
+    document.getElementById('statHadir').textContent = hariHadir.size;
+    document.getElementById('statTerlambat').textContent = aktif.filter(r => r.status !== 'Valid').length;
+  }
+
+  function setAvatar_(url) {
+    const initial = (CURRENT_NAMA || '-').trim().charAt(0).toUpperCase() || '-';
+    ['avatarInit', 'profilAvatar'].forEach(id => {
+      const el = document.getElementById(id);
+      el.textContent = initial;
+      if (!url) return;
+      const img = document.createElement('img');
+      img.alt = '';
+      img.onerror = () => { el.textContent = initial; };
+      img.src = url;
+      el.textContent = '';
+      el.appendChild(img);
+    });
+  }
+
+  function kompresFotoProfil_(file, selesai, gagal) {
+    const reader = new FileReader();
+    reader.onerror = () => gagal('Gagal membaca foto.');
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => gagal('File bukan gambar yang valid.');
+      img.onload = () => {
+        const sisi = Math.min(img.width, img.height);
+        const out = 400;
+        const canvas = document.createElement('canvas');
+        canvas.width = out; canvas.height = out;
+        canvas.getContext('2d').drawImage(img, (img.width - sisi) / 2, (img.height - sisi) / 2, sisi, sisi, 0, 0, out, out);
+        selesai(canvas.toDataURL('image/jpeg', 0.8));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  document.getElementById('inputFotoProfil').addEventListener('change', function (e) {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    const btn = document.getElementById('btnUbahFoto');
+    const teksAsli = '📷 Ubah Foto Profil';
+    btn.disabled = true; btn.textContent = 'Mengunggah...';
+    kompresFotoProfil_(file, dataUrl => {
+      callGas_('setFotoProfilKaryawan', { nama: CURRENT_NAMA, nik: CURRENT_NIK, fotoBase64: dataUrl },
+        data => {
+          btn.disabled = false; btn.textContent = teksAsli;
+          CURRENT_FOTO_URL = (data && data.fotoProfilUrl) || '';
+          setAvatar_(dataUrl);
+          showMsg('✅ Foto profil berhasil diperbarui.', 'ok');
+        },
+        err => { btn.disabled = false; btn.textContent = teksAsli; showMsg('❌ ' + err.message, 'err'); }
+      );
+    }, pesan => { btn.disabled = false; btn.textContent = teksAsli; showMsg('❌ ' + pesan, 'err'); });
+  });
 
   function escHtml_(t) {
     return String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

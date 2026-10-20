@@ -376,6 +376,22 @@ function getRiwayatAbsen(nik) {
     .reverse();
 }
 
+/**
+ * Periode aktif (bulan/tahun dari label Realisasi!A2) untuk statistik di halaman Absensi Online.
+ * Hasil: { tahun, bulan (1-12), label }. Label tak terbaca -> bulan berjalan.
+ */
+function getPeriodeAktif() {
+  const now = new Date();
+  let tahun = now.getFullYear(), bulan = now.getMonth() + 1, label = '';
+  const sheet = getSpreadsheet_().getSheetByName(CONFIG.SHEET_REALISASI);
+  if (sheet) {
+    label = String(sheet.getRange(2, 1).getValue() || '').trim();
+    const my = parsePeriodMonthYear_(label);
+    if (my) { tahun = my.year; bulan = my.monthIndex + 1; }
+  }
+  return { tahun: tahun, bulan: bulan, label: label.replace(/^periode\s*:?\s*/i, '') };
+}
+
 function formatTanggalAbsen_(value) {
   if (value === null || value === undefined || value === '') return '-';
   if (value instanceof Date) {

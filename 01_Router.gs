@@ -113,6 +113,7 @@ const ROUTES = {
   searchKaryawanUntukAbsen: { fn: 'searchKaryawanUntukAbsen', args: ['query'], public: true },
   submitAbsenOnline: { fn: 'submitAbsenOnline', args: ['nama', 'nik', 'jenis', 'lat', 'lng', 'akurasi', 'fotoBase64'], public: true },
   getRiwayatAbsen: { fn: 'getRiwayatAbsen', args: ['nik'], public: true },
+  getPeriodeAktif: { fn: 'getPeriodeAktif', args: [], public: true },
   setFotoProfilKaryawan: { fn: 'setFotoProfilKaryawan', args: ['nama', 'nik', 'fotoBase64'], public: true },
 
   /* ---- BACKUP RELIEVER (publik) ---- */
