@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "app.netlify.ams_wisma46.twa",
+        "sha256_cert_fingerprints": ["4F:F1:1F:51:94:34:37:83:41:59:F8:27:D7:60:4E:90:5F:A1:68:D3:82:36:68:5E:53:CC:5F:1E:89:09:11:7E"]
+      }
+    }]
