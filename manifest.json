@@ -1,0 +1,18 @@
+{
+  "name": "AMS Housekeeping - Absensi Online",
+  "short_name": "AMS Absensi",
+  "description": "Aplikasi absensi online, jadwal kerja, dan form izin digital karyawan.",
+  "id": "/absensi",
+  "start_url": "/absensi",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#0b2f6b",
+  "lang": "id",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
