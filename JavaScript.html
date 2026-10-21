@@ -317,8 +317,22 @@ const TAB_TITLES_ = {
     return m.indexOf('login') !== -1 || m.indexOf('Sesi') !== -1;
   }
 
+  /** Dashboard jangan kosong tanpa penjelasan: tampilkan "memuat" atau pesan gagal + tombol coba lagi selama data utama belum ada. */
+  function showDashLoadState_(kind, message) {
+    if (STATE) return;
+    const c = document.getElementById('cards');
+    if (!c) return;
+    c.innerHTML = kind === 'error'
+      ? '<div style="grid-column:1/-1;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:12px 14px;font-size:13px;">' +
+        '<div style="font-weight:600;margin-bottom:6px;">Data dashboard belum berhasil dimuat</div>' +
+        '<div style="margin-bottom:10px;">' + escapeHtml(message || 'Terjadi kesalahan.') + '</div>' +
+        '<button class="btn btn-primary" onclick="loadData(true)">⟳ Coba Lagi</button></div>'
+      : '<p class="muted" style="grid-column:1/-1;">⏳ Memuat data dashboard...</p>';
+  }
+
   function loadData(showToast) {
     if (!SESSION) { showLoginGate(); return; }
+    showDashLoadState_('loading');
     if (currentViewPeriodKey !== 'active') {
       loadArchivedData_(currentViewPeriodKey, showToast);
       return;
@@ -332,6 +346,7 @@ const TAB_TITLES_ = {
       })
       .withFailureHandler(err => {
         toast('Gagal memuat data: ' + err.message, true);
+        showDashLoadState_('error', err.message);
         if (isAuthError_(err.message)) doLogout();
       })
       .getAllData(SESSION.token, currentDeptFilter);
@@ -800,6 +815,7 @@ function onDepartmentFilterChange() {
   }
   function postLoginLoad_(retriesLeft) {
     if (retriesLeft === undefined) retriesLeft = 6;
+    showDashLoadState_('loading');
     google.script.run
       .withSuccessHandler(data => {
         STATE = data;
@@ -817,6 +833,7 @@ function onDepartmentFilterChange() {
           setTimeout(() => postLoginLoad_(retriesLeft - 1), 1200);
         } else {
           toast('Gagal memuat data: ' + err.message, true);
+          showDashLoadState_('error', err.message);
           if (isAuthError_(err.message)) doLogout();
         }
       })
