@@ -98,3 +98,16 @@ console.log('Target: ' + target.toUpperCase() + ' -> ...' + gasUrl.slice(-24));
     _fs.copyFileSync(_path.join(__dirname, f), _path.join(out, 'icons', f));
   }
 }
+
+
+// --- PWA: assetlinks.json agar bar alamat hilang di aplikasi ---
+{
+  const _fs = require('fs');
+  const _path = require('path');
+  const dir = _path.join(__dirname, 'public', '.well-known');
+  _fs.mkdirSync(dir, { recursive: true });
+  _fs.copyFileSync(
+    _path.join(__dirname, 'assetlinks.json'),
+    _path.join(dir, 'assetlinks.json')
+  );
+}
