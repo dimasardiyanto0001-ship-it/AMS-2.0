@@ -16,13 +16,21 @@ function assignmentStatusOf_(rawValue) {
 
 /* ============================ TAMBAH ============================ */
 
-function addEmployee(nama, jabatan, nik, department, token) {
+function addEmployee(nama, jabatan, nik, department, email, noHp, token) {
   const session = requireUploadAccess_(token, 'Hanya akun dengan role "Super Admin" atau "Admin" yang boleh menambah karyawan.');
   nama = String(nama || '').trim();
   jabatan = String(jabatan || '').trim();
   nik = String(nik || '').trim();
   department = String(department || '').trim();
+  email = String(email || '').trim();
+  noHp = String(noHp || '').replace(/[\s\-().]/g, '');
   if (!nama) throw new Error('Nama karyawan wajib diisi.');
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error('Format email tidak valid.');
+  }
+  if (noHp && !/^\+?\d{8,15}$/.test(noHp)) {
+    throw new Error('Nomor telepon tidak valid (hanya angka, 8-15 digit).');
+  }
 
   withScriptLock_(() => {
     const nikSheet = getOrCreateNikSheet_();
@@ -34,6 +42,8 @@ function addEmployee(nama, jabatan, nik, department, token) {
     row[EMP_COL.NAMA - 1] = nama;
     row[EMP_COL.NIK - 1] = nik;
     row[EMP_COL.DEPARTMENT - 1] = department;
+    row[EMP_COL.EMAIL - 1] = email;
+    row[EMP_COL.NO_HP - 1] = noHp;
     row[EMP_COL.STATUS_KARYAWAN - 1] = 'Aktif';
     row[EMP_COL.TGL_REGISTRASI - 1] = new Date();
     row[EMP_COL.JABATAN - 1] = jabatan;
@@ -49,8 +59,8 @@ function addEmployee(nama, jabatan, nik, department, token) {
   return result;
 }
 
-/** Karyawan baru hanya mengisi kolom 1..8 (No HP dan FotoProfil dibiarkan kosong). */
-const STATUS_ASSIGNMENT_COL_COUNT_ = EMP_COL.STATUS_ASSIGNMENT;
+/** Karyawan baru mengisi kolom 1..9 (sampai No HP); FotoProfil dan kolom pola dibiarkan kosong. */
+const STATUS_ASSIGNMENT_COL_COUNT_ = EMP_COL.NO_HP;
 
 /* ============================ ASSIGN KE JADWAL ============================ */
 

@@ -141,7 +141,7 @@ function saveRealisasiBatch(updates, token) {
 
 /** Ubah satu sel shift di sheet Jadwal (klik sel di web, khusus Super Admin, periode aktif). */
 function saveJadwal(rowIndex, dayIndex, kode, token) {
-  const session = requireSuperAdmin_(token, 'Hanya akun dengan role "Super Admin" yang boleh mengubah Jadwal.');
+  const session = requireUploadAccess_(token, 'Hanya akun dengan role "Super Admin" atau "Admin" yang boleh mengubah Jadwal.');
   kode = normalizeKode_(kode);
   if (kode !== '' && !getShiftCodesDynamic_().hasOwnProperty(kode)) {
     throw new Error('Kode shift tidak valid: ' + kode);
@@ -189,7 +189,7 @@ function summarizeJadwalBatch_(items) {
  * @param {Array<{rowIndex:number, dayIndex:number, kode:string}>} updates
  */
 function saveJadwalBatch(updates, token) {
-  const session = requireSuperAdmin_(token, 'Hanya akun dengan role "Super Admin" yang boleh mengubah Jadwal.');
+  const session = requireUploadAccess_(token, 'Hanya akun dengan role "Super Admin" atau "Admin" yang boleh mengubah Jadwal.');
   if (!Array.isArray(updates)) throw new Error('Data update harus berupa daftar sel.');
   if (updates.length === 0) return getAllDataInternal_();
   if (updates.length > JADWAL_BATCH_MAX_) {
