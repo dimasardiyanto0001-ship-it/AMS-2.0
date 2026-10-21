@@ -84,3 +84,17 @@ pages.forEach(function (p) {
   console.log('  ' + p.out.padEnd(22) + (html.length / 1024).toFixed(0).padStart(5) + ' KB, ' + scripts + ' blok script OK');
 });
 console.log('Target: ' + target.toUpperCase() + ' -> ...' + gasUrl.slice(-24));
+
+// --- PWA: salin manifest, service worker, dan ikon ke folder public ---
+{
+  const _fs = require('fs');
+  const _path = require('path');
+  const out = _path.join(__dirname, 'public');
+  _fs.mkdirSync(_path.join(out, 'icons'), { recursive: true });
+  for (const f of ['manifest.json', 'sw.js']) {
+    _fs.copyFileSync(_path.join(__dirname, f), _path.join(out, f));
+  }
+  for (const f of ['icon-192.png', 'icon-512.png', 'icon-maskable-512.png']) {
+    _fs.copyFileSync(_path.join(__dirname, f), _path.join(out, 'icons', f));
+  }
+}
