@@ -875,7 +875,7 @@ function onDepartmentFilterChange() {
     const isArchiveView = currentViewPeriodKey !== 'active';
     const canEditInputPermission = !!MY_PERMISSIONS_.edit && MY_PERMISSIONS_.edit.indexOf('input') !== -1;
     const canEdit = !!SESSION && canEditInputPermission && !isArchiveView;
-    const canEditJadwal = !!SESSION && SESSION.role === 'Super Admin' && !isArchiveView;
+    const canEditJadwal = canManageEmployee_() && !isArchiveView;
 
     document.querySelectorAll('#tab-input .day-cell').forEach(cell => {
       cell.classList.toggle('editable', canEdit);
@@ -953,7 +953,7 @@ function onDepartmentFilterChange() {
     renderCards();
     renderLegend('legendJadwal', STATE.shiftCodes);
     renderLegend('legendRealisasi', STATE.statusCodes);
-    const jadwalEditable = !!SESSION && SESSION.role === 'Super Admin' && currentViewPeriodKey === 'active';
+    const jadwalEditable = canManageEmployee_() && currentViewPeriodKey === 'active';
     renderGrid('jadwalWrap', STATE.jadwal, STATE.dayCount, STATE.dayNames, STATE.shiftCodes, jadwalEditable, 'jadwal');
     syncBatchPending_('jadwal');
     const realisasiEditable = !!SESSION && MY_PERMISSIONS_.edit && MY_PERMISSIONS_.edit.indexOf('input') !== -1 && currentViewPeriodKey === 'active';
@@ -1788,7 +1788,7 @@ function renderAvgJamKerjaSparkline_() {
       dataKey: 'jadwal', codesKey: 'shiftCodes', saveFn: 'saveJadwalBatch',
       pickTitle: 'Pilih shift untuk sel terpilih',
       denyMsg: 'Hanya admin yang boleh mengubah Jadwal',
-      canEdit: () => !!SESSION && SESSION.role === 'Super Admin' && currentViewPeriodKey === 'active'
+      canEdit: () => canManageEmployee_() && currentViewPeriodKey === 'active'
     }
   };
   const BATCH_STATE_ = {};
