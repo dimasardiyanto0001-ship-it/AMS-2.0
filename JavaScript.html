@@ -50,7 +50,7 @@
   downloadJadwalTemplate: ['token', 'department'],
   generateJadwalTemplateExcel: ['token'],
   getDaftarKaryawan: ['token'],
-  addEmployee: ['nama', 'jabatan', 'nik', 'department', 'token'],
+  addEmployee: ['nama', 'jabatan', 'nik', 'department', 'email', 'noHp', 'token'],
   deleteEmployee: ['nama', 'token', 'confirmDataLoss'],
   setEmployeeNik: ['nama', 'nik', 'token'],
   setEmployeeMasterData: ['nama', 'fields', 'token'],
@@ -2043,6 +2043,8 @@ function renderAvgJamKerjaSparkline_() {
     }
     document.getElementById('newEmployeeNama').value = '';
     document.getElementById('newEmployeeNik').value = '';
+    document.getElementById('newEmployeeEmail').value = '';
+    document.getElementById('newEmployeeNoHp').value = '';
     document.getElementById('newEmployeeDept').value = '';
 document.getElementById('newEmployeeDeptSearch').value = '';
 document.getElementById('newEmployeeDeptOptions').classList.add('hidden');
@@ -2137,8 +2139,14 @@ function ensureDeptOptionsListener_() {
   const nik = document.getElementById('newEmployeeNik').value.trim();
   const department = document.getElementById('newEmployeeDept').value.trim();
   const jabatan = document.getElementById('newEmployeeJabatan').value.trim();
+  const email = document.getElementById('newEmployeeEmail').value.trim();
+  const noHp = document.getElementById('newEmployeeNoHp').value.trim();
   if (!nama) {
     document.getElementById('addEmployeeError').textContent = 'Nama karyawan wajib diisi.';
+    return;
+  }
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    document.getElementById('addEmployeeError').textContent = 'Format email tidak valid.';
     return;
   }
   if (!department) {
@@ -2162,7 +2170,7 @@ function ensureDeptOptionsListener_() {
         btn.disabled = false;
         document.getElementById('addEmployeeError').textContent = err.message;
       })
-      .addEmployee(nama, jabatan, nik, department, SESSION ? SESSION.token : null);
+      .addEmployee(nama, jabatan, nik, department, email, noHp, SESSION ? SESSION.token : null);
   }
 
 /* ============ HAPUS KARYAWAN (RESIGN) ============ */

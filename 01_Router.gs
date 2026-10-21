@@ -70,7 +70,7 @@ const ROUTES = {
 
   /* ---- KARYAWAN ---- */
   getDaftarKaryawan: { fn: 'getDaftarKaryawan', args: ['token'] },
-  addEmployee: { fn: 'addEmployee', args: ['nama', 'jabatan', 'nik', 'department', 'token'] },
+  addEmployee: { fn: 'addEmployee', args: ['nama', 'jabatan', 'nik', 'department', 'email', 'noHp', 'token'] },
   deleteEmployee: { fn: 'deleteEmployee', args: ['nama', 'token', 'confirmDataLoss'] },
   setEmployeeNik: { fn: 'setEmployeeNik', args: ['nama', 'nik', 'token'] },
   setEmployeeMasterData: { fn: 'setEmployeeMasterData', args: ['nama', 'fields', 'token'] },
