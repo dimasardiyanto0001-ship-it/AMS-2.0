@@ -1041,4 +1041,38 @@
 .notif-item.unread { background: #f0f4ff; }
 .notif-item .notif-title { font-weight: 600; margin-bottom: 2px; }
 .notif-item .notif-time { color: #999; font-size: 11px; margin-top: 4px; }
+
+/* ============ PENYEMPURNAAN TAMPILAN HP ============ */
+.toast { max-width: min(520px, calc(100vw - 100px)); white-space: normal; line-height: 1.4; }
+html { -webkit-text-size-adjust: 100%; }
+
+@media (max-width: 768px) {
+  /* Notifikasi: lebar penuh dan di atas tombol Chat AI, tidak tertutup */
+  .toast { left: 12px; right: 12px; bottom: 84px; max-width: none; }
+
+  /* Popup tampil di atas tombol Chat AI mengambang; kolom Department selebar kolom lain */
+  .picker { z-index: 600; }
+  .dept-search-wrap { width: 100%; }
+  .dept-search-wrap input { width: 100%; box-sizing: border-box; }
+
+  /* Popup: bisa di-scroll sendiri supaya tombol Tambah/Batal tidak hilang di balik keyboard */
+  .picker { align-items: flex-start; padding: 12px 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .picker-box { margin: auto; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); overflow-y: auto; }
+  .picker-actions { position: sticky; bottom: -16px; background: #fff; padding: 10px 0 2px; margin-top: 6px; }
+  .picker-actions .btn { flex: 1; min-height: 42px; }
+
+  /* Isian 16px: mencegah browser HP otomatis zoom saat mengetik; area sentuh cukup besar */
+  .login-form input, .login-form select, .picker-box input, .picker-box select, .picker-box textarea,
+  .search-input, .period-selector, .filter-group select { font-size: 16px; }
+  .login-form input, .picker-box input, .picker-box select { min-height: 44px; }
+  .btn { min-height: 40px; }
+
+  /* Tabel: geser horizontal halus, kolom Aksi tidak patah baris */
+  .table-wrap { -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+  td .btn, td button { min-height: 34px; }
+
+  /* Panel tidak melebihi layar */
+  .panel { overflow-wrap: anywhere; }
+  .panel .table-wrap { overflow-wrap: normal; }
+}
 </style>
