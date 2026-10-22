@@ -61,6 +61,7 @@ function isFilledCell_(v) {
 /* ============================ DIAGNOSIS ============================ */
 
 function cekSpreadsheetAktif() {
+  requireScriptOwner_();
   const ss = getSpreadsheet_();
   Logger.log('Nama Spreadsheet: ' + ss.getName());
   Logger.log('ID Spreadsheet : ' + ss.getId());
@@ -99,6 +100,7 @@ function getRawNameListFromNikSheet_() {
  * Hasil di sheet "_DebugNamaMismatch" (hanya baris bermasalah).
  */
 function debugNameMismatch() {
+  requireScriptOwner_();
   const jamKerjaSheet = getSpreadsheet_().getSheetByName(CONFIG.SHEET_JAMKERJA);
 
   const rekapNames = getRawNameList_(CONFIG.SHEET_REKAP);
@@ -155,6 +157,7 @@ function debugNameMismatch() {
  * (Versi lama mengira sistem berhenti di baris kosong PERTAMA sehingga laporannya berlebihan.)
  */
 function findBlankRowGaps() {
+  requireScriptOwner_();
   const ss = getSpreadsheet_();
   const rows = [['Sheet', 'Baris Kosong Pertama', 'Baris Terakhir yg Dihitung Sistem', 'Jumlah Baris Terisi yg TIDAK Dihitung Sistem', 'Contoh Nama yg Tidak Dihitung']];
 
@@ -196,6 +199,7 @@ function findBlankRowGaps() {
  * DULU sebelum bersihkanJamNyangkutOFF().
  */
 function auditJamNyangkutOFF() {
+  requireScriptOwner_();
   const ss = getSpreadsheet_();
   const size = getActiveGridSize_();
   if (!size) {
@@ -238,6 +242,7 @@ function auditJamNyangkutOFF() {
 
 /** Uji getJadwalHariIni untuk satu nama (default: karyawan pertama di Jadwal). */
 function testGetJadwalHariIni(nama) {
+  requireScriptOwner_();
   if (!nama) {
     const first = readGrid_(CONFIG.SHEET_JADWAL).employees[0];
     nama = first ? first.nama : '';
@@ -252,6 +257,7 @@ function testGetJadwalHariIni(nama) {
 
 /** Tampilkan isi sheet SettingJamKerja di log. */
 function debugShiftSheet() {
+  requireScriptOwner_();
   const ss = getSpreadsheet_();
   Logger.log('Semua nama sheet di spreadsheet ini: ' + JSON.stringify(ss.getSheets().map(s => s.getName())));
 
@@ -271,6 +277,7 @@ function debugShiftSheet() {
  * sama. Jalankan HANYA setelah meninjau auditJamNyangkutOFF(). Sheet arsip tidak disentuh.
  */
 function bersihkanJamNyangkutOFF() {
+  requireScriptOwner_();
   const ss = getSpreadsheet_();
   const size = getActiveGridSize_();
   if (!size) {
@@ -308,6 +315,7 @@ function bersihkanJamNyangkutOFF() {
 
 /** Kosongkan SEMUA kolom hari JamKerja & JamScan periode aktif (arsip tidak disentuh). */
 function fixJamKerjaPeriodeAktifSekarang() {
+  requireScriptOwner_();
   const ss = getSpreadsheet_();
   const size = getActiveGridSize_();
   if (!size) {
@@ -342,6 +350,7 @@ function fixJamKerjaPeriodeAktifSekarang() {
  * khusus Agustus 2026 dan kini tercakup di sini).
  */
 function backfillRekapBulananDariArsip() {
+  requireScriptOwner_();
   const ss = getSpreadsheet_();
   if (!ss.getSheetByName(ARCHIVE_INDEX_SHEET)) {
     Logger.log('Sheet ArsipIndex belum ada, tidak ada yang bisa di-backfill.');

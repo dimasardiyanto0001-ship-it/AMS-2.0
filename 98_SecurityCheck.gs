@@ -11,6 +11,7 @@ const SECRET_PROPERTY_KEYS_ = ['LEGACY_PASSWORD_SALT', 'REPORT_EMAIL', 'GEMINI_A
 
 /** Status terisi/kosong tiap rahasia (nilainya TIDAK ditampilkan). @return {Object} kunci -> boolean */
 function periksaRahasiaScriptProperties() {
+  requireScriptOwner_();
   const status = {};
   SECRET_PROPERTY_KEYS_.forEach(key => {
     status[key] = !!getSetting_(key, '');
@@ -26,6 +27,7 @@ function periksaRahasiaScriptProperties() {
  * @return {string[]}
  */
 function periksaAkunBelumTermigrasi() {
+  requireScriptOwner_();
   const rows = getSheet_(CONFIG.SHEET_USERS).getDataRange().getValues().slice(1);
   const legacy = rows
     .filter(r => String(r[USERS_COL.USERNAME - 1] || '').trim() && !String(r[USERS_COL.SALT - 1] || '').trim())

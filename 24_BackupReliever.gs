@@ -455,10 +455,12 @@ function hitungRelieverSummary_(now) {
 /* ============================ ALAT BANTU (jalankan dari editor) ============================ */
 
 function buatSheetDataReliever() {
+  requireScriptOwner_();
   getOrCreateDataRelieverSheet_();
 }
 
 function testBuatSheetBackupReliever() {
+  requireScriptOwner_();
   const sheet = getOrCreateBackupRelieverSheet_();
   Logger.log('Sheet berhasil dibuat/ditemukan: ' + sheet.getName());
   Logger.log('Isi baris ' + CONFIG.HEADER_ROW + ' (header tanggal): ' + JSON.stringify(sheet.getRange(CONFIG.HEADER_ROW, 1, 1, 10).getValues()));
@@ -466,6 +468,7 @@ function testBuatSheetBackupReliever() {
 }
 
 function testGetKaryawanAbsenHariIni() {
+  requireScriptOwner_();
   const hasil = getKaryawanAbsenHariIni();
   Logger.log('Jumlah karyawan A/I/S hari ini: ' + hasil.length);
   Logger.log(JSON.stringify(hasil));
@@ -473,6 +476,7 @@ function testGetKaryawanAbsenHariIni() {
 
 /** Diagnosa dropdown "digantikan": karyawan A/I/S pada tanggal tertentu (kosong = hari ini) di periode aktif. */
 function debugKaryawanAbsenTanggalManual(tanggal) {
+  requireScriptOwner_();
   const realisasiSheet = getSheet_(CONFIG.SHEET_REALISASI);
   const periodText = String(realisasiSheet.getRange(2, 1).getValue() || '').trim();
   Logger.log('Periode (Realisasi!A2): "' + periodText + '" -> ' + JSON.stringify(parsePeriodMonthYear_(periodText)));

@@ -409,7 +409,7 @@ let CURRENT_PERUSAHAAN_KARYAWAN = '', CURRENT_FOTO_URL = '', PERIODE_AKTIF = nul
         return;
       }
       fNamaSuggest.innerHTML = hasil.map(h =>
-        `<div class="suggest-item" data-nama="${h.nama.replace(/"/g, '&quot;')}" data-perusahaan="${(h.perusahaan||'').replace(/"/g,'&quot;')}">${h.label}</div>`
+        `<div class="suggest-item" data-nama="${escHtml_(h.nama)}" data-perusahaan="${escHtml_(h.perusahaan||'')}">${escHtml_(h.label)}</div>`
       ).join('');
       fNamaSuggest.classList.add('show');
     }, () => { fNamaSuggest.classList.remove('show'); });
@@ -520,7 +520,7 @@ function muatDaftarMenggantikan_() {
       return;
     }
     select.innerHTML = '<option value="">-- Pilih karyawan --</option>' +
-      list.map(k => `<option value="${k.nama}" data-jenis="${k.jenis}">${k.nama} (${k.jenis})</option>`).join('');
+      list.map(k => `<option value="${escHtml_(k.nama)}" data-jenis="${escHtml_(k.jenis)}">${escHtml_(k.nama)} (${escHtml_(k.jenis)})</option>`).join('');
   }, () => {
     document.getElementById('selectMenggantikan').innerHTML = '<option value="">Gagal memuat daftar</option>';
   });
@@ -588,8 +588,8 @@ function muatDaftarMenggantikan_() {
       renderRiwayat();
       hitungStatistik_();
     }, err => {
-      document.getElementById('riwayatListHome').innerHTML = '<div class="empty">Gagal memuat: ' + err.message + '</div>';
-      document.getElementById('riwayatListFull').innerHTML = '<div class="empty">Gagal memuat: ' + err.message + '</div>';
+      document.getElementById('riwayatListHome').innerHTML = '<div class="empty">Gagal memuat: ' + escHtml_(err.message) + '</div>';
+      document.getElementById('riwayatListFull').innerHTML = '<div class="empty">Gagal memuat: ' + escHtml_(err.message) + '</div>';
     });
   }
 

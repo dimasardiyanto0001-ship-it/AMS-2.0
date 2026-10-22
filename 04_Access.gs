@@ -49,6 +49,28 @@ function requireUploadAccess_(token, pesanError) {
   throw new Error(pesanError);
 }
 
+/**
+ * Untuk fungsi yang HANYA boleh dijalankan pemilik script dari editor Apps Script
+ * (setup, debug, perbaikan data). Fungsi global tanpa garis bawah di akhir nama bisa
+ * dipanggil siapa pun yang membuka web app lewat google.script.run, jadi fungsi seperti
+ * itu wajib memanggil ini di baris pertama. Pengunjung web app (anonim) punya
+ * getActiveUser() kosong, sedangkan dari editor keduanya sama dengan email pemilik.
+ */
+function isScriptOwnerRun_() {
+  const active = String(Session.getActiveUser().getEmail() || '').toLowerCase();
+  const owner = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
+  return !!active && !!owner && active === owner;
+}
+
+/** Lempar error bila pemanggil bukan pemilik script (lihat penjelasan di atas). */
+function requireScriptOwner_() {
+  const active = String(Session.getActiveUser().getEmail() || '').toLowerCase();
+  const owner = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
+  if (!active || !owner || active !== owner) {
+    throw new Error('Fungsi ini hanya boleh dijalankan pemilik script dari editor Apps Script.');
+  }
+}
+
 /* ============================ SHEET ROLES & PERMISSIONS ============================ */
 
 const ROLE_DESC_ = {
@@ -240,7 +262,7 @@ function getUsersList(token) {
 
 function addUserWeb(nama, username, password, role, token) {
   getUsersSheet_();
-  const session = requireMenuAccess_(token, 'settingaccount');
+  const session = requireSuperAdmin_(token, 'Hanya Super Admin yang boleh mengelola akun pengguna.');
 
   nama = String(nama || '').trim();
   username = String(username || '').trim();
@@ -267,7 +289,7 @@ function addUserWeb(nama, username, password, role, token) {
 
 function setUserStatus(username, status, token) {
   getUsersSheet_();
-  const session = requireMenuAccess_(token, 'settingaccount');
+  const session = requireSuperAdmin_(token, 'Hanya Super Admin yang boleh mengelola akun pengguna.');
 
   status = status === 'Nonaktif' ? 'Nonaktif' : 'Aktif';
   username = String(username || '').trim();
@@ -289,9 +311,9 @@ function setUserStatus(username, status, token) {
 
 function resetUserPasswordByAdmin(username, newPassword, token) {
   getUsersSheet_();
-  const session = requireMenuAccess_(token, 'settingaccount');
+  const session = requireSuperAdmin_(token, 'Hanya Super Admin yang boleh mengelola akun pengguna.');
   if (!newPassword || String(newPassword).length < 6) throw new Error('Password baru minimal 6 karakter.');
-  updateUserPassword(username, newPassword);
+  updateUserPassword_(username, newPassword);
   catatAuditLog_(session, 'Reset Password User', 'Akun', username, 'Password direset oleh admin');
   return { success: true };
 }

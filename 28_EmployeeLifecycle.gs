@@ -25,6 +25,13 @@ function addEmployee(nama, jabatan, nik, department, email, noHp, token) {
   email = String(email || '').trim();
   noHp = String(noHp || '').replace(/[\s\-().]/g, '');
   if (!nama) throw new Error('Nama karyawan wajib diisi.');
+  if (nama.length > 100 || /[\u0000-\u001f<>]/.test(nama) || /^[=+\-@]/.test(nama)) {
+    throw new Error('Nama tidak valid (maks. 100 karakter; tanpa < > dan tidak boleh diawali = + - @).');
+  }
+  if (/[\u0000-\u001f]/.test(jabatan + department + nik)) throw new Error('Jabatan/department/NIK mengandung karakter tidak valid.');
+  jabatan = guardSheetText_(jabatan, 100);
+  department = guardSheetText_(department, 100);
+  nik = guardSheetText_(nik, 50);
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new Error('Format email tidak valid.');
   }
@@ -42,7 +49,7 @@ function addEmployee(nama, jabatan, nik, department, email, noHp, token) {
     row[EMP_COL.NAMA - 1] = nama;
     row[EMP_COL.NIK - 1] = nik;
     row[EMP_COL.DEPARTMENT - 1] = department;
-    row[EMP_COL.EMAIL - 1] = email;
+    row[EMP_COL.EMAIL - 1] = guardSheetText_(email, 150);
     row[EMP_COL.NO_HP - 1] = noHp;
     row[EMP_COL.STATUS_KARYAWAN - 1] = 'Aktif';
     row[EMP_COL.TGL_REGISTRASI - 1] = new Date();

@@ -43,6 +43,7 @@ const JAM_KERJA_MAKS_ = 16;                // durasi absen Masuk-Pulang di atas 
  * yang dibutuhkan file ini tetapi belum ada di project. Hasil ada di Execution log.
  */
 function cekDependensiAbsenOnline() {
+  requireScriptOwner_();
   const fungsi = ['getSheet_', 'getKaryawanMasterMap_', 'getOrCreateNikSheet_', 'withScriptLock_',
     'parsePeriodMonthYear_', 'getLastEmployeeRow_', 'getDayColCount_', 'getOrSyncJamScanSheet_',
     'getOrSyncJamKerjaSheet_', 'splitScanPair_', 'formatScanPair_'];
@@ -475,6 +476,7 @@ function tandaiFotoTerhapusDiSheet_(batasWaktu) {
 
 /** Jalankan SEKALI dari editor untuk memasang trigger bulanan. */
 function setupTriggerHapusFotoAbsenLama() {
+  requireScriptOwner_();
   ScriptApp.getProjectTriggers().forEach(t => {
     if (t.getHandlerFunction() === 'hapusFotoAbsenLama_') {
       ScriptApp.deleteTrigger(t);
@@ -492,6 +494,7 @@ function setupTriggerHapusFotoAbsenLama() {
 
 /** Alat uji manual: tampilkan riwayat absen karyawan pertama di DataKaryawan (atau yang namanya mengandung `namaCari`). */
 function testRiwayat(namaCari) {
+  requireScriptOwner_();
   const sheet = getOrCreateNikSheet_();
   if (sheet.getLastRow() < 2) { Logger.log('DataKaryawan kosong.'); return; }
   const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();

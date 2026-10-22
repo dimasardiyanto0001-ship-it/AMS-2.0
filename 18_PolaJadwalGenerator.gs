@@ -352,6 +352,7 @@ function generateJadwalDariPola(mode, token) {
  * Panggil migrasiPolaDariKolom9dan10(true) = benar-benar memindahkan.
  */
 function migrasiPolaDariKolom9dan10(jalankan) {
+  requireScriptOwner_();
   const sheet = getOrCreateNikSheet_();
   const polaNames = {};
   readPolaShiftRows_().forEach(p => { polaNames[nameKey_(p.namaPola)] = p.namaPola; });

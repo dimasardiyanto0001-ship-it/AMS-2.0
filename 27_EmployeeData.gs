@@ -154,7 +154,7 @@ function setEmployeeMasterData(nama, fields, token) {
     const row = idx + 2;
     Object.keys(EMP_EDITABLE_FIELDS_).forEach(field => {
       if (fields.hasOwnProperty(field)) {
-        sheet.getRange(row, EMP_EDITABLE_FIELDS_[field]).setValue(String(fields[field] || '').trim());
+        sheet.getRange(row, EMP_EDITABLE_FIELDS_[field]).setValue(guardSheetText_(String(fields[field] || '').trim(), 150));
       }
     });
     SpreadsheetApp.flush();

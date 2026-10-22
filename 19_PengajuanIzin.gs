@@ -540,6 +540,7 @@ function getNamaDenganPengajuanAktifPadaTanggal_(targetDate) {
 
 /** JALANKAN SEKALI dari editor: pasang trigger yang menandai Alfa tiap hari jam 23:00. Aman diulang. */
 function setupAutoAlfaTrigger() {
+  requireScriptOwner_();
   ScriptApp.getProjectTriggers().forEach(t => {
     if (t.getHandlerFunction() === 'autoTandaiAlfaHarian_') {
       ScriptApp.deleteTrigger(t);
@@ -560,6 +561,7 @@ function setupAutoAlfaTrigger() {
  * adanya di Log Eksekusi, tanpa token/session/web app.
  */
 function debugPengajuanRaw() {
+  requireScriptOwner_();
   const sheet = getOrCreatePengajuanSheet_();
   const lastRow = sheet.getLastRow();
   Logger.log('Spreadsheet aktif: ' + getSpreadsheet_().getUrl());

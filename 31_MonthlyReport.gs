@@ -29,7 +29,26 @@ const REPORT_RIGHT_ = 'text-align:right;';
 
 /* ============================ KIRIM ============================ */
 
+/**
+ * Nama fungsi ini dipakai trigger waktu (setupMonthlyReportTrigger) dan juga publik bagi
+ * google.script.run. Trigger tidak bisa dibedakan dari pemanggil luar, jadi pengiriman dibatasi
+ * satu kali per 20 jam (laporannya sama persis, jadi pemanggil luar tidak menambah apa pun selain
+ * satu pengiriman yang memang akan terjadi). Pemilik script dari editor tidak dibatasi.
+ */
 function sendMonthlyReportEmail() {
+  if (!isScriptOwnerRun_()) {
+    const props = PropertiesService.getScriptProperties();
+    const last = Number(props.getProperty('MONTHLY_REPORT_LAST_SENT_MS') || 0);
+    if (Date.now() - last < 20 * 60 * 60 * 1000) {
+      Logger.log('sendMonthlyReportEmail dilewati: sudah dikirim dalam 20 jam terakhir.');
+      return;
+    }
+    props.setProperty('MONTHLY_REPORT_LAST_SENT_MS', String(Date.now()));
+  }
+  sendMonthlyReportEmail_();
+}
+
+function sendMonthlyReportEmail_() {
   let source = resolveMonthlyReportSource_(new Date());
 
   let data;
@@ -61,6 +80,7 @@ function sendMonthlyReportEmail() {
 
 /** Pasang trigger bulanan (hapus trigger lama dulu agar tidak dobel). Jalankan sekali dari editor. */
 function setupMonthlyReportTrigger() {
+  requireScriptOwner_();
   ScriptApp.getProjectTriggers().forEach(t => {
     if (t.getHandlerFunction() === 'sendMonthlyReportEmail') ScriptApp.deleteTrigger(t);
   });

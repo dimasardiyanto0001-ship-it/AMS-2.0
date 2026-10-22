@@ -1736,7 +1736,7 @@ function renderAvgJamKerjaSparkline_() {
       const pct = (typeof r.persenKehadiran === 'number') ? (r.persenKehadiran * 100).toFixed(1) + '%' : r.persenKehadiran;
       const nik = r.nik || '';
       const nikCellAttrs = canEditNik
-        ? `class="nik-cell" onclick="openNikPicker(${JSON.stringify(r.nama)})"`
+        ? `class="nik-cell" data-nama="${escapeHtml(r.nama)}" onclick="openNikPicker(this.dataset.nama)"`
         : 'class="nik-cell readonly"';
       const nikLabel = nik ? escapeHtml(nik) : (canEditNik ? '+ isi NIK' : '-');
 
@@ -2399,7 +2399,7 @@ function submitDeleteEmployee() {
         <td>${k.statusKaryawan ? escapeHtml(k.statusKaryawan) : '-'}</td>
         <td>${k.tanggalRegistrasi ? escapeHtml(k.tanggalRegistrasi) : '-'}</td>
         <td>${assignBadge}</td>
-        ${canEdit ? `<td><button class="btn btn-ghost" onclick='openEditKaryawanPicker(${JSON.stringify(k.nama)})'>✏ Edit</button></td>` : ''}
+        ${canEdit ? `<td><button class="btn btn-ghost" data-nama="${escapeHtml(k.nama)}" onclick="openEditKaryawanPicker(this.dataset.nama)">✏ Edit</button></td>` : ''}
       </tr>`;
     });
     html += '</tbody></table>';
@@ -3095,7 +3095,8 @@ function submitDeleteEmployee() {
   function escapeHtml(str) {
   if (str === null || str === undefined) return '';
   return String(str)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 /** Ubah string "yyyy-MM-dd" (format tanggal dari backend Pengajuan Izin) jadi "dd/mm/yyyy". */
@@ -3568,8 +3569,8 @@ function sendAIChatMessage() {
         <td>${escapeHtml(u.role)}</td>
         <td>${isNonaktif ? '<span style="color:#dc2626;font-weight:600;">Nonaktif</span>' : '<span style="color:#16a34a;font-weight:600;">Aktif</span>'}</td>
         ${canEdit ? `<td style="white-space:nowrap;">
-          <button class="btn btn-ghost" onclick='openResetUserPasswordPicker(${JSON.stringify(u.username)})'>🔑 Reset Password</button>
-          <button class="btn ${isNonaktif ? 'btn-add' : 'btn-danger'}" onclick='toggleUserStatus(${JSON.stringify(u.username)}, ${JSON.stringify(isNonaktif ? "Aktif" : "Nonaktif")})'>${isNonaktif ? '✔ Aktifkan' : '🚫 Nonaktifkan'}</button>
+          <button class="btn btn-ghost" data-u="${escapeHtml(u.username)}" onclick="openResetUserPasswordPicker(this.dataset.u)">🔑 Reset Password</button>
+          <button class="btn ${isNonaktif ? 'btn-add' : 'btn-danger'}" data-u="${escapeHtml(u.username)}" data-s="${isNonaktif ? 'Aktif' : 'Nonaktif'}" onclick="toggleUserStatus(this.dataset.u, this.dataset.s)">${isNonaktif ? '✔ Aktifkan' : '🚫 Nonaktifkan'}</button>
         </td>` : ''}
       </tr>`;
     });

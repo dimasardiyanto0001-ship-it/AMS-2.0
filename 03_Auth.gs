@@ -8,6 +8,7 @@
 
 /** Jalankan SEKALI dari editor. Membuat sheet Users + akun admin default. */
 function setupUsersSheet() {
+  requireScriptOwner_();
   const ss = getSpreadsheet_();
   if (ss.getSheetByName(CONFIG.SHEET_USERS)) {
     throw new Error('Sheet "Users" sudah ada. Hapus manual dulu jika ingin setup ulang.');
@@ -128,14 +129,26 @@ function setUserPassword_(sheet, rowNumber, newPassword) {
 
 /* ============================ API AKUN (editor) ============================ */
 
+/** Dari editor saja (pemilik script). Jalur web memakai addUserWeb (wajib Super Admin). */
 function addUser(username, password, nama, role) {
+  requireScriptOwner_();
+  return addUser_(username, password, nama, role);
+}
+
+function addUser_(username, password, nama, role) {
   const sheet = getUsersSheet_();
   const salt = generateSalt_();
   sheet.appendRow([username, hashPasswordWithSalt_(password, salt), nama, role || 'Staff', salt, 'Aktif']);
   Logger.log('User "%s" berhasil ditambahkan.', username);
 }
 
+/** Dari editor saja (pemilik script). Jalur web memakai resetUserPasswordByAdmin (wajib Super Admin). */
 function updateUserPassword(username, newPassword) {
+  requireScriptOwner_();
+  return updateUserPassword_(username, newPassword);
+}
+
+function updateUserPassword_(username, newPassword) {
   if (!username || !newPassword) throw new Error('Username dan password baru wajib diisi.');
   const sheet = getUsersSheet_();
   const found = findUserRow_(sheet, username);

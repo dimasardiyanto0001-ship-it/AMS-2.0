@@ -211,6 +211,7 @@ function include(filename) {
  *  - nama fungsi ganda di tabel (alias).
  */
 function auditRoutes() {
+  requireScriptOwner_();
   const problems = [];
   Object.keys(ROUTES).forEach(name => {
     const r = ROUTES[name];
@@ -223,6 +224,7 @@ function auditRoutes() {
 
 /** Hasilkan isi GAS_PARAM_MAP_ untuk adapter Netlify (salin dari Log eksekusi). */
 function getRouteParamMap() {
+  requireScriptOwner_();
   const map = {};
   Object.keys(ROUTES).forEach(name => { map[name] = ROUTES[name].args; });
   Logger.log(JSON.stringify(map, null, 2));
