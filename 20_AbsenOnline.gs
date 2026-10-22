@@ -109,12 +109,30 @@ function ensureLogAbsenOnlineHasFotoColumn_(sheet) {
 
 /* ============================ VERIFIKASI ============================ */
 
+const NIK_MAX_GAGAL_ = 5;        // salah NIK berturut-turut per nama
+const NIK_KUNCI_DETIK_ = 900;    // 15 menit (CacheService maks 6 jam)
+
+/**
+ * Verifikasi nama + NIK untuk endpoint publik. NIK adalah satu-satunya "kata sandi",
+ * jadi tebakan dibatasi: NIK_MAX_GAGAL_ kali salah untuk satu nama mengunci nama itu
+ * NIK_KUNCI_DETIK_ detik (juga untuk NIK yang benar). Berhasil -> penghitung direset.
+ * Catatan: kunci per nama berarti orang lain bisa mengunci absen seseorang sementara;
+ * itu dipilih karena lebih ringan daripada NIK tertebak. Solusi tuntas: PIN pribadi.
+ */
 function verifyKaryawanByNamaNik_(nama, nik) {
-  const master = getKaryawanMasterMap_()[String(nama || '').trim().toLowerCase()];
-  if (!master) throw new Error('Nama karyawan tidak ditemukan.');
-  if (String(master.nik || '').trim() !== String(nik || '').trim()) {
-    throw new Error('NIK tidak sesuai dengan data karyawan.');
+  const namaKey = String(nama || '').trim().toLowerCase();
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'nikfail_' + Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, namaKey)).substring(0, 40);
+  const gagal = Number(cache.get(cacheKey) || 0);
+  if (gagal >= NIK_MAX_GAGAL_) {
+    throw new Error('Terlalu banyak percobaan NIK salah. Coba lagi dalam ' + Math.round(NIK_KUNCI_DETIK_ / 60) + ' menit atau hubungi admin.');
   }
+  const master = getKaryawanMasterMap_()[namaKey];
+  if (!master || String(master.nik || '').trim() !== String(nik || '').trim() || !String(nik || '').trim()) {
+    if (master) cache.put(cacheKey, String(gagal + 1), NIK_KUNCI_DETIK_);
+    throw new Error(master ? 'NIK tidak sesuai dengan data karyawan.' : 'Nama karyawan tidak ditemukan.');
+  }
+  if (gagal) cache.remove(cacheKey);
   return master;
 }
 

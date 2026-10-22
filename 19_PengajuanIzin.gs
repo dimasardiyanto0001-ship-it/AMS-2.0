@@ -138,8 +138,11 @@ function submitPengajuanIzin(nama, nik, jenis, tglMulai, tglAkhir, alasan, lampi
   if (!nikTerdaftar) {
     throw new Error('NIK untuk nama "' + nama + '" belum terdaftar di sistem. Hubungi admin untuk melengkapi data karyawan terlebih dahulu.');
   }
-  if (String(nikTerdaftar).trim() !== nik) {
-    throw new Error('Nama dan NIK tidak cocok dengan data karyawan terdaftar. Periksa kembali.');
+  // Pakai verifikator yang sama dengan absen (membatasi tebakan NIK).
+  try {
+    verifyKaryawanByNamaNik_(nama, nik);
+  } catch (e) {
+    throw new Error(/Terlalu banyak/.test(e.message) ? e.message : 'Nama dan NIK tidak cocok dengan data karyawan terdaftar. Periksa kembali.');
   }
 
   const lampiranUrl = saveLampiranToDrive_(lampiranData, lampiranFilename, lampiranMimeType);
