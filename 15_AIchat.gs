@@ -18,6 +18,10 @@ const AI_FALLBACK_MODELS_DEFAULT_ = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'
 const AI_RETRYABLE_CODES_ = [429, 500, 503, 504]; // error sementara -> retry
 const AI_MAX_ATTEMPTS_PER_MODEL_ = 2;
 const AI_MAX_MESSAGE_LENGTH_ = 1000;
+const AI_MAX_OUTPUT_TOKENS_ = 2048;
+const AI_THINKING_LEVEL_ = 'minimal';   // Gemini 3.x: minimal | low | medium | high
+const AI_CONTEXT_CACHE_KEY_ = 'AI_DATA_CONTEXT';
+const AI_CONTEXT_CACHE_SEC_ = 45;
 const AI_EMAIL_RE_ = /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/;
 
 function getAiModel_() {
@@ -44,18 +48,27 @@ function callGeminiAI_(promptText, systemInstruction) {
   const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
   if (!apiKey) throw new Error('GEMINI_API_KEY belum diset di Script Properties.');
 
-  const payload = {
-    system_instruction: { parts: [{ text: systemInstruction }] },
-    contents: [{ role: 'user', parts: [{ text: promptText }] }],
-    generationConfig: { responseMimeType: 'application/json' }
-  };
-  const options = {
-    method: 'post',
-    contentType: 'application/json',
-    headers: { 'x-goog-api-key': apiKey },
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true
-  };
+  // Tanya-jawab data tidak perlu "berpikir panjang": mode berpikir dimatikan/diminimalkan supaya respons cepat.
+  // Gemini 2.5 memakai thinkingBudget, Gemini 3.x memakai thinkingLevel. Bila model menolak pengaturan ini
+  // (HTTP 400), panggilan diulang tanpa pengaturan itu.
+  function buildOptions(model, denganThinking) {
+    const generationConfig = { responseMimeType: 'application/json', maxOutputTokens: AI_MAX_OUTPUT_TOKENS_, temperature: 0.2 };
+    if (denganThinking) {
+      if (/gemini-2\.5-flash/.test(model)) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+      else if (/gemini-3/.test(model)) generationConfig.thinkingConfig = { thinkingLevel: AI_THINKING_LEVEL_ };
+    }
+    return {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { 'x-goog-api-key': apiKey },
+      payload: JSON.stringify({
+        system_instruction: { parts: [{ text: systemInstruction }] },
+        contents: [{ role: 'user', parts: [{ text: promptText }] }],
+        generationConfig: generationConfig
+      }),
+      muteHttpExceptions: true
+    };
+  }
 
   const models = getAiModelChain_();
   let lastCode = 0;
@@ -65,14 +78,20 @@ function callGeminiAI_(promptText, systemInstruction) {
   for (let m = 0; m < models.length; m++) {
     const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + models[m] + ':generateContent';
 
+    let denganThinking = true;
     for (let attempt = 0; attempt < AI_MAX_ATTEMPTS_PER_MODEL_; attempt++) {
-      res = UrlFetchApp.fetch(url, options);
+      res = UrlFetchApp.fetch(url, buildOptions(models[m], denganThinking));
       lastCode = res.getResponseCode();
 
       if (lastCode === 200) break outer;
 
       Logger.log('Gemini ' + models[m] + ' -> ' + lastCode + ': ' + res.getContentText().substring(0, 300));
 
+      if (lastCode === 400 && denganThinking) { // mungkin pengaturan thinking tidak didukung model ini
+        denganThinking = false;
+        attempt--;
+        continue;
+      }
       if (lastCode === 404) break; // nama model salah/tidak ada -> langsung model berikutnya
       if (AI_RETRYABLE_CODES_.indexOf(lastCode) === -1) { // 400/401/403 dll: bukan masalah sementara
         throw new Error('Gagal memanggil AI (' + lastCode + '). Periksa GEMINI_API_KEY / pengaturan AI.');
@@ -203,7 +222,19 @@ function buildAIDailyContext_(data) {
 
 /** Ringkasan data periode aktif yang dikirim ke AI sebagai konteks (bukan seluruh raw sheet). */
 function buildAIDataContext_() {
-  const data = getAllDataInternal_();
+  // Konteks dipakai ulang 45 dtk: pertanyaan beruntun tidak membaca ulang seluruh sheet.
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(AI_CONTEXT_CACHE_KEY_);
+  if (cached) {
+    try { return JSON.parse(cached); } catch (e) { /* cache korup -> hitung ulang */ }
+  }
+  const context = buildAIDataContextFresh_();
+  try { cache.put(AI_CONTEXT_CACHE_KEY_, JSON.stringify(context), AI_CONTEXT_CACHE_SEC_); } catch (e) { /* >100KB: lewati cache */ }
+  return context;
+}
+
+function buildAIDataContextFresh_() {
+  const data = getAllDataInternal_(true);   // skipSync: tidak perlu sinkron OFF (menulis sheet) hanya untuk bertanya
   const daily = buildAIDailyContext_(data);
   return {
     period: data.period,
