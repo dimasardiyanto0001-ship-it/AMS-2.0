@@ -109,36 +109,121 @@ function ensureLogAbsenOnlineHasFotoColumn_(sheet) {
 
 /* ============================ VERIFIKASI ============================ */
 
-const NIK_MAX_GAGAL_ = 5;        // salah NIK berturut-turut per nama
-const NIK_KUNCI_DETIK_ = 900;    // 15 menit (CacheService maks 6 jam)
+const PIN_MAX_GAGAL_ = 5;        // salah PIN/NIK berturut-turut per nama
+const PIN_KUNCI_DETIK_ = 900;    // 15 menit (CacheService maks 6 jam)
+const PIN_BELUM_DIATUR_ = 'PIN_BELUM_DIATUR';
+
+function pinFailKey_(namaKey) {
+  return 'pinfail_' + Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, namaKey)).substring(0, 40);
+}
+
+/** Lempar error bila nama ini sudah terlalu sering salah; kembalikan hitungan saat ini. */
+function cekKunciPin_(namaKey) {
+  const gagal = Number(CacheService.getScriptCache().get(pinFailKey_(namaKey)) || 0);
+  if (gagal >= PIN_MAX_GAGAL_) {
+    throw new Error('Terlalu banyak percobaan salah. Coba lagi dalam ' + Math.round(PIN_KUNCI_DETIK_ / 60) + ' menit atau hubungi admin.');
+  }
+  return gagal;
+}
+
+function catatGagalPin_(namaKey, gagal) {
+  CacheService.getScriptCache().put(pinFailKey_(namaKey), String(gagal + 1), PIN_KUNCI_DETIK_);
+}
+
+function buatPinHash_(pin) {
+  const salt = generateSalt_();
+  return salt + '$' + hashPasswordWithSalt_(String(pin), salt);
+}
+
+function pinCocok_(pin, stored) {
+  const parts = String(stored || '').split('$');
+  return parts.length === 2 && parts[0] !== '' && hashPasswordWithSalt_(String(pin), parts[0]) === parts[1];
+}
+
+function validasiFormatPin_(pin) {
+  pin = String(pin || '').trim();
+  if (!/^\d{6}$/.test(pin)) throw new Error('PIN harus 6 digit angka.');
+  if (/^(\d)\1{5}$/.test(pin) || '0123456789012345'.indexOf(pin) !== -1 || '9876543210987654'.indexOf(pin) !== -1) {
+    throw new Error('PIN terlalu mudah ditebak (mis. 111111 atau 123456). Pilih PIN lain.');
+  }
+  return pin;
+}
 
 /**
- * Verifikasi nama + NIK untuk endpoint publik. NIK adalah satu-satunya "kata sandi",
- * jadi tebakan dibatasi: NIK_MAX_GAGAL_ kali salah untuk satu nama mengunci nama itu
- * NIK_KUNCI_DETIK_ detik (juga untuk NIK yang benar). Berhasil -> penghitung direset.
- * Catatan: kunci per nama berarti orang lain bisa mengunci absen seseorang sementara;
- * itu dipilih karena lebih ringan daripada NIK tertebak. Solusi tuntas: PIN pribadi.
+ * Verifikasi nama + PIN untuk endpoint publik. 5 kali salah untuk satu nama mengunci
+ * nama itu 15 menit (termasuk untuk PIN yang benar). Karyawan yang PIN-nya belum
+ * diaktifkan ditolak dengan pesan 'PIN_BELUM_DIATUR' (frontend lalu menawarkan aktivasi).
  */
-function verifyKaryawanByNamaNik_(nama, nik) {
+function verifyKaryawanByNamaPin_(nama, pin) {
   const namaKey = String(nama || '').trim().toLowerCase();
-  const cache = CacheService.getScriptCache();
-  const cacheKey = 'nikfail_' + Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, namaKey)).substring(0, 40);
-  const gagal = Number(cache.get(cacheKey) || 0);
-  if (gagal >= NIK_MAX_GAGAL_) {
-    throw new Error('Terlalu banyak percobaan NIK salah. Coba lagi dalam ' + Math.round(NIK_KUNCI_DETIK_ / 60) + ' menit atau hubungi admin.');
-  }
+  const gagal = cekKunciPin_(namaKey);
   const master = getKaryawanMasterMap_()[namaKey];
-  if (!master || String(master.nik || '').trim() !== String(nik || '').trim() || !String(nik || '').trim()) {
-    if (master) cache.put(cacheKey, String(gagal + 1), NIK_KUNCI_DETIK_);
-    throw new Error(master ? 'NIK tidak sesuai dengan data karyawan.' : 'Nama karyawan tidak ditemukan.');
+  if (!master) throw new Error('Nama karyawan tidak ditemukan.');
+  if (!master.pinHash) throw new Error(PIN_BELUM_DIATUR_);
+  if (!pinCocok_(pin, master.pinHash)) {
+    catatGagalPin_(namaKey, gagal);
+    throw new Error('PIN salah.');
   }
-  if (gagal) cache.remove(cacheKey);
+  if (gagal) CacheService.getScriptCache().remove(pinFailKey_(namaKey));
   return master;
 }
 
-function verifyLoginAbsenOnline(nama, nik) {
-  const master = verifyKaryawanByNamaNik_(nama, nik);
-  return { department: master.department || '-', fotoProfilUrl: master.fotoProfilUrl || '' };
+/**
+ * Aktivasi PIN pertama kali: nama + NIK (sekali pakai, hanya bila PIN belum ada) + PIN baru.
+ * Setelah aktif, NIK tidak berlaku lagi untuk absen; PIN hanya bisa diganti lewat reset admin.
+ */
+function aktivasiPinKaryawan(nama, nik, pinBaru) {
+  nama = String(nama || '').trim();
+  const namaKey = nama.toLowerCase();
+  nik = String(nik || '').trim();
+  if (!nama || !nik) throw new Error('Nama dan NIK wajib diisi.');
+  pinBaru = validasiFormatPin_(pinBaru);
+
+  const gagal = cekKunciPin_(namaKey);
+  withScriptLock_(() => {
+    const sheet = getOrCreateNikSheet_();
+    const rows = readEmployeeRows_(sheet, EMP_NUM_COLS_);
+    const idx = indexOfEmployee_(rows, nama);
+    if (idx === -1) throw new Error('Nama karyawan tidak ditemukan.');
+    const row = rows[idx];
+    if (cellText_(row[EMP_COL.PIN_HASH - 1])) {
+      throw new Error('PIN sudah pernah diatur. Hubungi admin bila lupa PIN.');
+    }
+    const nikTerdaftar = cellText_(row[EMP_COL.NIK - 1]);
+    if (!nikTerdaftar || nikTerdaftar !== nik) {
+      catatGagalPin_(namaKey, gagal);
+      throw new Error('NIK tidak sesuai dengan data karyawan.');
+    }
+    const cell = sheet.getRange(idx + 2, EMP_COL.PIN_HASH);
+    cell.setNumberFormat('@');
+    cell.setValue(buatPinHash_(pinBaru));
+    SpreadsheetApp.flush();
+  }, 15000);
+  CacheService.getScriptCache().remove(pinFailKey_(namaKey));
+  return { success: true };
+}
+
+
+/** Admin / Super Admin: kosongkan PIN karyawan supaya bisa diaktifkan ulang dengan NIK. */
+function resetPinKaryawan(nama, token) {
+  const session = requireUploadAccess_(token, 'Hanya akun dengan role "Super Admin" atau "Admin" yang boleh mereset PIN karyawan.');
+  nama = String(nama || '').trim();
+  if (!nama) throw new Error('Nama karyawan wajib diisi.');
+  withScriptLock_(() => {
+    const sheet = getOrCreateNikSheet_();
+    const idx = indexOfEmployee_(readEmployeeRows_(sheet, 1), nama);
+    if (idx === -1) throw new Error('Karyawan "' + nama + '" tidak ditemukan.');
+    sheet.getRange(idx + 2, EMP_COL.PIN_HASH).setValue('');
+    SpreadsheetApp.flush();
+  }, 15000);
+  CacheService.getScriptCache().remove(pinFailKey_(nama.toLowerCase()));
+  catatAuditLog_(session, 'Reset PIN Karyawan', 'Karyawan', nama, 'PIN absen dikosongkan; karyawan harus mengaktifkan ulang');
+  return getDaftarKaryawanInternal_();
+}
+
+function verifyLoginAbsenOnline(nama, pin) {
+  const master = verifyKaryawanByNamaPin_(nama, pin);
+  return { department: master.department || '-', fotoProfilUrl: master.fotoProfilUrl || '', nik: master.nik || '' };
 }
 
 /**
@@ -237,14 +322,14 @@ function menitDariJam_(s) {
  * dan karyawan ada di Realisasi: sel yang sudah S/I/C/A/1/2 tidak diubah.
  * Hasil: { status, jam, jarak [, periodeBelumDiganti, periode] }.
  */
-function submitAbsenOnline(nama, nik, jenis, lat, lng, akurasi, fotoBase64) {
+function submitAbsenOnline(nama, pin, jenis, lat, lng, akurasi, fotoBase64) {
   nama = String(nama || '').trim();
-  nik = String(nik || '').trim();
+  pin = String(pin || '').trim();
   jenis = String(jenis || '').trim();
   const latRaw = lat, lngRaw = lng;
   lat = Number(lat); lng = Number(lng);
 
-  if (!nama || !nik) throw new Error('Nama dan NIK wajib diisi.');
+  if (!nama || !pin) throw new Error('Nama dan PIN wajib diisi.');
   if (jenis !== 'Masuk' && jenis !== 'Pulang') throw new Error('Jenis absen tidak valid.');
   const gpsKosong = (latRaw === null || latRaw === '' || lngRaw === null || lngRaw === '');
   if (gpsKosong || !isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
@@ -252,7 +337,7 @@ function submitAbsenOnline(nama, nik, jenis, lat, lng, akurasi, fotoBase64) {
   }
   if (!fotoBase64) throw new Error('Foto selfie wajib diambil sebelum absen.');
 
-  verifyKaryawanByNamaNik_(nama, nik);
+  const nik = verifyKaryawanByNamaPin_(nama, pin).nik;   // NIK tetap dicatat di log dari data master
 
   // Cek lokasi SEBELUM foto disimpan / log ditulis: absen di luar radius tidak meninggalkan jejak.
   const lokasi = getSettingLokasiAbsen_();
@@ -376,9 +461,11 @@ function tulisJamKerja_(ss, rowNum, col, jam) {
 
 /* ============================ RIWAYAT ============================ */
 
-function getRiwayatAbsen(nik) {
-  nik = String(nik || '').trim();
-  if (!nik) throw new Error('NIK wajib diisi.');
+function getRiwayatAbsen(nama, pin) {
+  nama = String(nama || '').trim();
+  if (!nama || !String(pin || '').trim()) throw new Error('Nama dan PIN wajib diisi.');
+  const nik = verifyKaryawanByNamaPin_(nama, pin).nik;
+  if (!nik) return [];
 
   const sheet = getOrCreateLogAbsenOnlineSheet_();
   const lastRow = sheet.getLastRow();
@@ -521,7 +608,7 @@ function testRiwayat(namaCari) {
   Logger.log('NIK ditemukan: ' + JSON.stringify(baris));
 
   if (baris) {
-    Logger.log('HASIL RIWAYAT: ' + JSON.stringify(getRiwayatAbsen(String(baris[1])), null, 2));
+    Logger.log('Riwayat kini butuh PIN karyawan; uji lewat halaman Absen Online.');
   }
 }
 
@@ -533,13 +620,13 @@ function getOrCreateFotoProfilFolder_() {
   return DriveApp.createFolder(FOTO_PROFIL_ROOT_FOLDER_NAME_);
 }
 
-function setFotoProfilKaryawan(nama, nik, fotoBase64) {
+function setFotoProfilKaryawan(nama, pin, fotoBase64) {
   nama = String(nama || '').trim();
-  nik = String(nik || '').trim();
-  if (!nama || !nik) throw new Error('Nama dan NIK wajib diisi.');
+  pin = String(pin || '').trim();
+  if (!nama || !pin) throw new Error('Nama dan PIN wajib diisi.');
   if (!fotoBase64) throw new Error('Foto wajib dipilih.');
 
-  verifyKaryawanByNamaNik_(nama, nik);
+  verifyKaryawanByNamaPin_(nama, pin);
 
   const namaFile = nama.replace(/[^\w]+/g, '_') + '_profil_' +
     Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'GMT+7', 'yyyyMMdd_HHmmss') + '.jpg';

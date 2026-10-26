@@ -61,9 +61,9 @@
     <label>Nama</label>
     <select id="fNama"><option value="">Memuat daftar nama...</option></select>
 
-    <label>NIK</label>
-    <input type="text" id="fNik" placeholder="Masukkan NIK Anda">
-    <div class="hint">NIK dipakai untuk verifikasi, harus sama persis dengan data di HR.</div>
+    <label>PIN</label>
+    <input type="password" id="fNik" inputmode="numeric" maxlength="6" autocomplete="current-password" placeholder="PIN 6 digit">
+    <div class="hint">PIN yang sama dengan di halaman Absen Online. Belum punya PIN? Buat dulu di halaman Absen Online.</div>
 
     <label>Jenis Pengajuan</label>
     <select id="fJenis">
@@ -145,7 +145,7 @@
 
   function submitForm() {
     const nama = document.getElementById('fNama').value;
-    const nik = document.getElementById('fNik').value.trim();
+    const pin = document.getElementById('fNik').value.trim();
     const jenis = document.getElementById('fJenis').value;
     const tglMulai = document.getElementById('fTglMulai').value;
     const tglAkhir = document.getElementById('fTglAkhir').value;
@@ -154,7 +154,7 @@
     const file = fileInput.files[0];
 
     if (!nama) { showMsg('Pilih nama Anda terlebih dahulu.', true); return; }
-    if (!nik) { showMsg('NIK wajib diisi.', true); return; }
+    if (!pin) { showMsg('PIN wajib diisi.', true); return; }
     if (!tglMulai || !tglAkhir) { showMsg('Tanggal mulai dan akhir wajib diisi.', true); return; }
     if (!alasan) { showMsg('Alasan wajib diisi.', true); return; }
     if (!file) { showMsg('Lampiran wajib diupload.', true); return; }
@@ -170,7 +170,7 @@
     reader.onload = () => {
       const base64 = reader.result.split(',')[1];
       callGas_('submitPengajuanIzin', {
-        nama, nik, jenis, tglMulai, tglAkhir, alasan,
+        nama, pin, jenis, tglMulai, tglAkhir, alasan,
         lampiranBase64: base64,
         lampiranFilename: file.name,
         lampiranMimeType: file.type
@@ -186,7 +186,7 @@
       }, err => {
         btn.disabled = false;
         btn.textContent = 'Kirim Pengajuan';
-        showMsg('❌ ' + err.message, true);
+        showMsg('❌ ' + (String(err.message).indexOf('PIN_BELUM_DIATUR') !== -1 ? 'PIN Anda belum dibuat. Buat dulu PIN di halaman Absen Online.' : err.message), true);
       });
     };
     reader.onerror = () => {

@@ -72,18 +72,20 @@
   generateReportPdf: ['reportType', 'title', 'columns', 'rows', 'token'],
   confirmSendEmailReport: ['tglMulai', 'tglAkhir', 'tujuanEmail', 'token'],
   getKaryawanForPublicForm: [],
-  submitPengajuanIzin: ['nama', 'nik', 'jenis', 'tglMulai', 'tglAkhir', 'alasan', 'lampiranBase64', 'lampiranFilename', 'lampiranMimeType'],
+  submitPengajuanIzin: ['nama', 'pin', 'jenis', 'tglMulai', 'tglAkhir', 'alasan', 'lampiranBase64', 'lampiranFilename', 'lampiranMimeType'],
   getPengajuanList: ['status', 'token'],
   getPengajuanListSafe: ['status', 'token'],
   getPengajuanPendingCount: ['token'],
   approvePengajuan: ['id', 'token'],
   rejectPengajuan: ['id', 'catatan', 'token'],
   getJadwalHariIni: ['nama'],
-  verifyLoginAbsenOnline: ['nama', 'nik'],
+  verifyLoginAbsenOnline: ['nama', 'pin'],
   searchKaryawanUntukAbsen: ['query'],
-  submitAbsenOnline: ['nama', 'nik', 'jenis', 'lat', 'lng', 'akurasi', 'fotoBase64'],
-  getRiwayatAbsen: ['nik'],
-  setFotoProfilKaryawan: ['nama', 'nik', 'fotoBase64'],
+  submitAbsenOnline: ['nama', 'pin', 'jenis', 'lat', 'lng', 'akurasi', 'fotoBase64'],
+  getRiwayatAbsen: ['nama', 'pin'],
+  setFotoProfilKaryawan: ['nama', 'pin', 'fotoBase64'],
+  aktivasiPinKaryawan: ['nama', 'nik', 'pinBaru'],
+  resetPinKaryawan: ['nama', 'token'],
   verifyLoginReliever: ['nama'],
   searchReliverAbsen: ['query'],
   getKaryawanAbsenHariIni: [],
@@ -2380,8 +2382,9 @@ function submitDeleteEmployee() {
 
   function renderDaftarKaryawanTable() {
     const canEdit = !!SESSION && SESSION.role === 'Super Admin';
+    const canPin = canManageEmployee_();
     const cols = ['NIK', 'No HP', 'Nama', 'Department', 'Jabatan', 'Email', 'Status Karyawan', 'Tanggal Registrasi', 'Status Jadwal'];
-    let html = '<table><thead><tr>' + cols.map(c => `<th>${c}</th>`).join('') + (canEdit ? '<th>Aksi</th>' : '') + '</tr></thead><tbody>';
+    let html = '<table><thead><tr>' + cols.map(c => `<th>${c}</th>`).join('') + (canEdit ? '<th>Aksi</th>' : '') + (canPin ? '<th>PIN Absen</th>' : '') + '</tr></thead><tbody>';
 
     DAFTAR_KARYAWAN_DATA.forEach(k => {
       const isBelumTerjadwal = k.statusAssignment === 'Belum Terjadwal';
@@ -2400,12 +2403,26 @@ function submitDeleteEmployee() {
         <td>${k.tanggalRegistrasi ? escapeHtml(k.tanggalRegistrasi) : '-'}</td>
         <td>${assignBadge}</td>
         ${canEdit ? `<td><button class="btn btn-ghost" data-nama="${escapeHtml(k.nama)}" onclick="openEditKaryawanPicker(this.dataset.nama)">✏ Edit</button></td>` : ''}
+        ${canPin ? `<td>${k.pinSet ? `<button class="btn btn-ghost" data-nama="${escapeHtml(k.nama)}" onclick="resetPinKaryawan_(this.dataset.nama)">🔑 Reset PIN</button>` : '<span class="muted">Belum dibuat</span>'}</td>` : ''}
       </tr>`;
     });
     html += '</tbody></table>';
     const wrap = document.getElementById('daftarKaryawanWrap');
     if (wrap) wrap.innerHTML = html;
     filterDaftarKaryawanTable();
+  }
+
+  function resetPinKaryawan_(nama) {
+    if (!canManageEmployee_()) return;
+    if (!confirm('Reset PIN absen ' + nama + '?\nKaryawan harus membuat PIN baru (memakai NIK) saat absen berikutnya.')) return;
+    google.script.run
+      .withSuccessHandler(list => {
+        DAFTAR_KARYAWAN_DATA = list || DAFTAR_KARYAWAN_DATA;
+        renderDaftarKaryawanTable();
+        toast('PIN ' + nama + ' direset. Minta karyawan membuat PIN baru di halaman Absen Online.');
+      })
+      .withFailureHandler(err => toast('Gagal reset PIN: ' + err.message, true))
+      .resetPinKaryawan(nama, SESSION.token);
   }
 
   function filterDaftarKaryawanTable() {

@@ -100,7 +100,7 @@ const ROUTES = {
 
   /* ---- PENGAJUAN IZIN ---- */
   getKaryawanForPublicForm: { fn: 'getKaryawanForPublicForm', args: [], public: true },
-  submitPengajuanIzin: { fn: 'submitPengajuanIzin', args: ['nama', 'nik', 'jenis', 'tglMulai', 'tglAkhir', 'alasan', 'lampiranBase64', 'lampiranFilename', 'lampiranMimeType'], public: true },
+  submitPengajuanIzin: { fn: 'submitPengajuanIzin', args: ['nama', 'pin', 'jenis', 'tglMulai', 'tglAkhir', 'alasan', 'lampiranBase64', 'lampiranFilename', 'lampiranMimeType'], public: true },
   getPengajuanList: { fn: 'getPengajuanList', args: ['status', 'token'] },
   getPengajuanListSafe: { fn: 'getPengajuanList', args: ['status', 'token'], stringify: true },
   getPengajuanPendingCount: { fn: 'getPengajuanPendingCount', args: ['token'] },
@@ -109,12 +109,14 @@ const ROUTES = {
 
   /* ---- ABSEN ONLINE (publik) ---- */
   getJadwalHariIni: { fn: 'getJadwalHariIni', args: ['nama'], public: true },
-  verifyLoginAbsenOnline: { fn: 'verifyLoginAbsenOnline', args: ['nama', 'nik'], public: true },
+  verifyLoginAbsenOnline: { fn: 'verifyLoginAbsenOnline', args: ['nama', 'pin'], public: true },
   searchKaryawanUntukAbsen: { fn: 'searchKaryawanUntukAbsen', args: ['query'], public: true },
-  submitAbsenOnline: { fn: 'submitAbsenOnline', args: ['nama', 'nik', 'jenis', 'lat', 'lng', 'akurasi', 'fotoBase64'], public: true },
-  getRiwayatAbsen: { fn: 'getRiwayatAbsen', args: ['nik'], public: true },
+  submitAbsenOnline: { fn: 'submitAbsenOnline', args: ['nama', 'pin', 'jenis', 'lat', 'lng', 'akurasi', 'fotoBase64'], public: true },
+  getRiwayatAbsen: { fn: 'getRiwayatAbsen', args: ['nama', 'pin'], public: true },
   getPeriodeAktif: { fn: 'getPeriodeAktif', args: [], public: true },
-  setFotoProfilKaryawan: { fn: 'setFotoProfilKaryawan', args: ['nama', 'nik', 'fotoBase64'], public: true },
+  setFotoProfilKaryawan: { fn: 'setFotoProfilKaryawan', args: ['nama', 'pin', 'fotoBase64'], public: true },
+  aktivasiPinKaryawan: { fn: 'aktivasiPinKaryawan', args: ['nama', 'nik', 'pinBaru'], public: true },
+  resetPinKaryawan: { fn: 'resetPinKaryawan', args: ['nama', 'token'] },
 
   /* ---- BACKUP RELIEVER (publik) ---- */
   verifyLoginReliever: { fn: 'verifyLoginReliever', args: ['nama'], public: true },

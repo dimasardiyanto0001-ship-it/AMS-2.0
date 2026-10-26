@@ -103,14 +103,14 @@ function getKaryawanForPublicForm() {
  * Terima pengajuan baru dari form publik. Lampiran WAJIB (base64), disimpan ke
  * folder Drive khusus dan tautannya dicatat di sheet.
  */
-function submitPengajuanIzin(nama, nik, jenis, tglMulai, tglAkhir, alasan, lampiranBase64, lampiranFilename, lampiranMimeType) {
+function submitPengajuanIzin(nama, pin, jenis, tglMulai, tglAkhir, alasan, lampiranBase64, lampiranFilename, lampiranMimeType) {
   nama = String(nama || '').trim();
-  nik = String(nik || '').trim();
+  pin = String(pin || '').trim();
   jenis = String(jenis || '').trim();
   alasan = String(alasan || '').trim();
 
   if (!nama) throw new Error('Nama wajib dipilih.');
-  if (!nik) throw new Error('NIK wajib diisi.');
+  if (!pin) throw new Error('PIN wajib diisi.');
   if (!PENGAJUAN_JENIS_KODE_.hasOwnProperty(jenis)) {
     throw new Error('Jenis pengajuan tidak valid. Harus Izin, Sakit, atau Cuti.');
   }
@@ -133,17 +133,8 @@ function submitPengajuanIzin(nama, nik, jenis, tglMulai, tglAkhir, alasan, lampi
     throw new Error('Ukuran lampiran maksimal ' + (PENGAJUAN_LAMPIRAN_MAX_BYTES_ / 1024 / 1024) + ' MB.');
   }
 
-  // Verifikasi Nama + NIK terhadap DataKaryawan.
-  const nikTerdaftar = getNikMap_()[nama.toLowerCase()];
-  if (!nikTerdaftar) {
-    throw new Error('NIK untuk nama "' + nama + '" belum terdaftar di sistem. Hubungi admin untuk melengkapi data karyawan terlebih dahulu.');
-  }
-  // Pakai verifikator yang sama dengan absen (membatasi tebakan NIK).
-  try {
-    verifyKaryawanByNamaNik_(nama, nik);
-  } catch (e) {
-    throw new Error(/Terlalu banyak/.test(e.message) ? e.message : 'Nama dan NIK tidak cocok dengan data karyawan terdaftar. Periksa kembali.');
-  }
+  // Verifikasi Nama + PIN (dibatasi: 5 salah -> terkunci 15 menit).
+  const nik = verifyKaryawanByNamaPin_(nama, pin).nik;
 
   const lampiranUrl = saveLampiranToDrive_(lampiranData, lampiranFilename, lampiranMimeType);
 

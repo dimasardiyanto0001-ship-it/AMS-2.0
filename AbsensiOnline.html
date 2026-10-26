@@ -237,9 +237,26 @@
 </div>
 
 <div class="field" id="fieldNik">
-  <label>NIK</label>
-  <input type="text" id="fNik" placeholder="Masukkan NIK Anda">
-  <div class="login-hint">NIK harus sama persis dengan data di HR.</div>
+  <label>PIN</label>
+  <input type="password" id="fPin" inputmode="numeric" maxlength="6" autocomplete="current-password" placeholder="PIN 6 digit">
+  <div class="login-hint">Belum punya PIN? Ketik nama lalu tekan Masuk, kami arahkan untuk membuatnya.</div>
+</div>
+
+<div id="aktivasiPin" style="display:none;">
+  <div class="field">
+    <label>NIK (hanya untuk membuat PIN pertama kali)</label>
+    <input type="text" id="aNik" placeholder="Masukkan NIK sesuai data HR" autocomplete="off">
+  </div>
+  <div class="field">
+    <label>PIN baru (6 digit angka)</label>
+    <input type="password" id="aPin1" inputmode="numeric" maxlength="6" autocomplete="new-password">
+  </div>
+  <div class="field">
+    <label>Ulangi PIN baru</label>
+    <input type="password" id="aPin2" inputmode="numeric" maxlength="6" autocomplete="new-password">
+    <div class="login-hint">Ingat PIN ini dan jangan dibagikan. Lupa PIN? Minta admin mereset.</div>
+  </div>
+  <button class="btn-primary" id="btnAktivasi" onclick="doAktivasiPin()">Simpan PIN &amp; Masuk</button>
 </div>
 
 <div class="field" id="fieldPerusahaan" style="display:none;">
@@ -367,7 +384,7 @@
   // WAJIB DIISI: URL hasil Deploy > Manage deployments > Web app di Apps Script Editor.
   const GAS_WEBAPP_URL_ = 'https://script.google.com/macros/s/AKfycbwh9YcVNmGKG5sNIJ2oZ-DXH0XjOa7NF9H649Z7POe16gc2wXFM-R3lpdKZVsroXcO7oA/exec';
 
-  let CURRENT_NAMA = '', CURRENT_NIK = '', RIWAYAT_CACHE = [], ACTIVE_FILTER = 'Semua';
+  let CURRENT_NAMA = '', CURRENT_NIK = '', CURRENT_PIN = '', RIWAYAT_CACHE = [], ACTIVE_FILTER = 'Semua';
 let CURRENT_MODE = 'karyawan';
 let CURRENT_PERUSAHAAN = '';
 let CURRENT_PERUSAHAAN_KARYAWAN = '', CURRENT_FOTO_URL = '', PERIODE_AKTIF = null;
@@ -451,19 +468,57 @@ let CURRENT_PERUSAHAAN_KARYAWAN = '', CURRENT_FOTO_URL = '', PERIODE_AKTIF = nul
     return;
   }
 
-  const nik = document.getElementById('fNik').value.trim();
-  if (!nik) { showMsg('NIK wajib diisi.', 'err'); btn.disabled = false; btn.textContent = teksAsli; return; }
+  const pin = document.getElementById('fPin').value.trim();
+  if (!pin) { showMsg('PIN wajib diisi.', 'err'); btn.disabled = false; btn.textContent = teksAsli; return; }
 
-  callGas_('verifyLoginAbsenOnline', { nama, nik },
+  callGas_('verifyLoginAbsenOnline', { nama, pin },
     data => {
       btn.disabled = false; btn.textContent = teksAsli;
-      CURRENT_NAMA = nama; CURRENT_NIK = nik;
+      CURRENT_NAMA = nama; CURRENT_PIN = pin; CURRENT_NIK = (data && data.nik) || '';
       CURRENT_PERUSAHAAN_KARYAWAN = (data && data.department && data.department !== '-') ? String(data.department).trim() : '';
       CURRENT_FOTO_URL = (data && data.fotoProfilUrl) ? String(data.fotoProfilUrl).trim() : '';
       masukKeHome_();
     },
-    err => { btn.disabled = false; btn.textContent = teksAsli; showMsg('❌ ' + err.message, 'err'); }
+    err => {
+      btn.disabled = false; btn.textContent = teksAsli;
+      if (String(err.message).indexOf('PIN_BELUM_DIATUR') !== -1) {
+        document.getElementById('aktivasiPin').style.display = 'block';
+        document.getElementById('fieldNik').style.display = 'none';
+        btn.style.display = 'none';
+        showMsg('PIN Anda belum dibuat. Isi NIK dan buat PIN 6 digit di bawah.', 'err');
+        return;
+      }
+      showMsg('❌ ' + err.message, 'err');
+    }
   );
+}
+
+function doAktivasiPin() {
+  const nama = document.getElementById('fNama').value.trim();
+  const nik = document.getElementById('aNik').value.trim();
+  const p1 = document.getElementById('aPin1').value.trim();
+  const p2 = document.getElementById('aPin2').value.trim();
+  if (!nik) { showMsg('NIK wajib diisi.', 'err'); return; }
+  if (!/^\d{6}$/.test(p1)) { showMsg('PIN harus 6 digit angka.', 'err'); return; }
+  if (p1 !== p2) { showMsg('Ulangi PIN tidak sama.', 'err'); return; }
+  const btn = document.getElementById('btnAktivasi');
+  btn.disabled = true;
+  callGas_('aktivasiPinKaryawan', { nama, nik, pinBaru: p1 },
+    () => {
+      btn.disabled = false;
+      resetAktivasiPin_();
+      document.getElementById('fPin').value = p1;
+      doLogin();
+    },
+    err => { btn.disabled = false; showMsg('❌ ' + err.message, 'err'); }
+  );
+}
+
+function resetAktivasiPin_() {
+  document.getElementById('aktivasiPin').style.display = 'none';
+  ['aNik', 'aPin1', 'aPin2'].forEach(id => { document.getElementById(id).value = ''; });
+  document.getElementById('btnLogin').style.display = '';
+  if (CURRENT_MODE === 'karyawan') document.getElementById('fieldNik').style.display = 'block';
 }
 function masukKeHome_() {
   const initial = CURRENT_NAMA.trim().charAt(0).toUpperCase();
@@ -529,7 +584,9 @@ function muatDaftarMenggantikan_() {
   document.getElementById('bottomNav').classList.remove('show');
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById('screenLogin').style.display = 'block';
-  document.getElementById('fNik').value = '';
+  document.getElementById('fPin').value = '';
+  CURRENT_PIN = ''; CURRENT_NIK = '';
+  resetAktivasiPin_();
   document.getElementById('fPerusahaan').value = '';
   document.querySelector('.navbtn[data-tab="Riwayat"]').style.display = '';
   pilihMode('karyawan');
@@ -582,7 +639,7 @@ function muatDaftarMenggantikan_() {
 
   function muatRiwayat() {
     const aksi = CURRENT_MODE === 'reliever' ? 'getRiwayatAbsenReliever' : 'getRiwayatAbsen';
-    const param = CURRENT_MODE === 'reliever' ? { nama: CURRENT_NAMA } : { nik: CURRENT_NIK };
+    const param = CURRENT_MODE === 'reliever' ? { nama: CURRENT_NAMA } : { nama: CURRENT_NAMA, pin: CURRENT_PIN };
     callGas_(aksi, param, rows => {
       RIWAYAT_CACHE = ringkasRiwayat_(rows || []);
       renderRiwayat();
@@ -684,7 +741,7 @@ function muatDaftarMenggantikan_() {
     const teksAsli = '📷 Ubah Foto Profil';
     btn.disabled = true; btn.textContent = 'Mengunggah...';
     kompresFotoProfil_(file, dataUrl => {
-      callGas_('setFotoProfilKaryawan', { nama: CURRENT_NAMA, nik: CURRENT_NIK, fotoBase64: dataUrl },
+      callGas_('setFotoProfilKaryawan', { nama: CURRENT_NAMA, pin: CURRENT_PIN, fotoBase64: dataUrl },
         data => {
           btn.disabled = false; btn.textContent = teksAsli;
           CURRENT_FOTO_URL = (data && data.fotoProfilUrl) || '';
@@ -809,7 +866,7 @@ function muatDaftarMenggantikan_() {
         }
 
         // alur karyawan tetap -- SAMA PERSIS seperti sebelumnya, tidak diubah
-        callGas_('submitAbsenOnline', { nama: CURRENT_NAMA, nik: CURRENT_NIK, jenis, lat, lng, akurasi, fotoBase64 },
+        callGas_('submitAbsenOnline', { nama: CURRENT_NAMA, pin: CURRENT_PIN, jenis, lat, lng, akurasi, fotoBase64 },
           data => {
             btn.disabled = false; btn.textContent = teksAsli;
             if (data.periodeBelumDiganti) {
@@ -842,7 +899,8 @@ function muatDaftarMenggantikan_() {
   document.getElementById('fieldNik').style.display = mode === 'karyawan' ? 'block' : 'none';
   document.getElementById('fieldPerusahaan').style.display = mode === 'reliever' ? 'block' : 'none';
   document.getElementById('fNama').value = '';
-  document.getElementById('fNik').value = '';
+  document.getElementById('fPin').value = '';
+  resetAktivasiPin_();
   document.getElementById('fPerusahaan').value = '';
   fNamaSuggest.classList.remove('show');
 }

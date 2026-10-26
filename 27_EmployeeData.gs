@@ -13,9 +13,10 @@ const STATUS_AKTIF_TERJADWAL = 'Aktif Terjadwal';
 const EMP_COL = {
   NAMA: 1, NIK: 2, DEPARTMENT: 3, EMAIL: 4, STATUS_KARYAWAN: 5,
   TGL_REGISTRASI: 6, JABATAN: 7, STATUS_ASSIGNMENT: 8, NO_HP: 9, FOTO_PROFIL: 10,
-  POLA_ASSIGNED: 11, OFFSET_HARI: 12   // pola rotasi shift (18_PolaJadwalGenerator.gs)
+  POLA_ASSIGNED: 11, OFFSET_HARI: 12,  // pola rotasi shift (18_PolaJadwalGenerator.gs)
+  PIN_HASH: 13                          // PIN absen: 'salt$hash' (20_AbsenOnline.gs); kosong = belum diaktifkan
 };
-const EMP_HEADERS_ = ['Nama', 'NIK', 'Department', 'Email', 'Status Karyawan', 'Tanggal Registrasi', 'Jabatan', 'Status Assignment', 'No HP', 'FotoProfil', 'PolaAssigned', 'OffsetHari'];
+const EMP_HEADERS_ = ['Nama', 'NIK', 'Department', 'Email', 'Status Karyawan', 'Tanggal Registrasi', 'Jabatan', 'Status Assignment', 'No HP', 'FotoProfil', 'PolaAssigned', 'OffsetHari', 'PinHash'];
 const EMP_NUM_COLS_ = EMP_HEADERS_.length;
 
 /** Field yang boleh diubah lewat setEmployeeMasterData -> nomor kolom. */
@@ -92,7 +93,8 @@ function getKaryawanMasterMap_() {
       email: cellText_(row[EMP_COL.EMAIL - 1]),
       statusKaryawan: cellText_(row[EMP_COL.STATUS_KARYAWAN - 1]),
       tanggalRegistrasi: row[EMP_COL.TGL_REGISTRASI - 1] || '',
-      fotoProfilUrl: cellText_(row[EMP_COL.FOTO_PROFIL - 1])
+      fotoProfilUrl: cellText_(row[EMP_COL.FOTO_PROFIL - 1]),
+      pinHash: cellText_(row[EMP_COL.PIN_HASH - 1])
     };
   });
   return map;
@@ -126,7 +128,8 @@ function getDaftarKaryawanInternal_() {
         noHp: String(r[EMP_COL.NO_HP - 1] || ''),
         fotoProfilUrl: String(r[EMP_COL.FOTO_PROFIL - 1] || ''),
         polaAssigned: cellText_(r[EMP_COL.POLA_ASSIGNED - 1]),
-        offsetHari: parseInt(r[EMP_COL.OFFSET_HARI - 1], 10) || 0
+        offsetHari: parseInt(r[EMP_COL.OFFSET_HARI - 1], 10) || 0,
+        pinSet: !!cellText_(r[EMP_COL.PIN_HASH - 1])   // hash TIDAK ikut dikirim ke browser
       };
     });
 }
