@@ -102,6 +102,9 @@ function callGeminiAI_(promptText, systemInstruction) {
 const AI_STATUS_KEY_ = { 'A': 'alfa', 'I': 'izin', 'S': 'sakit', 'C': 'cuti', 'OFF': 'off' };
 
 /** "07:05" / "7:05" -> menit sejak 00:00; selain itu null. */
+/** Toleransi keterlambatan (menit): telat > nilai ini baru dianggap terlambat. */
+const AI_TOLERANSI_TERLAMBAT_MENIT_ = 5;
+
 function aiJamKeMenit_(s) {
   const m = String(s || '').trim().match(/^(\d{1,2}):(\d{2})/);
   if (!m) return null;
@@ -110,7 +113,7 @@ function aiJamKeMenit_(s) {
 }
 
 /**
- * Menit keterlambatan = scan masuk - jam masuk shift (>0 = terlambat, <=0 = tepat waktu/lebih awal).
+ * Menit keterlambatan = scan masuk - jam masuk shift (selisih mentah; toleransi diterapkan pemanggil).
  * Selisih dibungkus ke -12..+12 jam supaya shift malam yang scan melewati tengah malam tetap benar.
  */
 function aiMenitTerlambat_(jamMasukShift, jamScanMasuk) {
@@ -169,7 +172,7 @@ function buildAIDailyContext_(data) {
         if (scan.masuk) {
           adaDataScan = true;
           const menit = aiMenitTerlambat_(shiftJam[cellCode_(jDays[i])], scan.masuk);
-          if (menit !== null && menit > 0) {
+          if (menit !== null && menit > AI_TOLERANSI_TERLAMBAT_MENIT_) {
             d.terlambat.push(nama + ' (masuk ' + scan.masuk + ', jadwal ' + shiftJam[cellCode_(jDays[i])] + ', telat ' + menit + ' menit)');
             tdk.terlambat.push(i + 1);
           }
@@ -254,7 +257,7 @@ function chatWithAI(pesan, token) {
     'Kalau user tidak sebutkan alamat email, isi tujuanEmail dengan null. ' +
     'DATA HARIAN: "harian" berisi per tanggal daftar nama untuk status hadir, lembur, terlambat, alfa, izin, sakit, cuti, off, belumDiisi, lainnya ' +
     '(status yang tidak ada orangnya tidak ditulis). "perKaryawan" berisi daftar tanggal alfa/izin/sakit/cuti per orang. ' +
-    '"terlambat" = karyawan hadir yang jam scan masuknya melewati jam masuk shift (sudah disertai jam scan, jam jadwal, dan menit telat); ' +
+    '"terlambat" = karyawan hadir yang jam scan masuknya melewati jam masuk shift lebih dari toleransi ' + AI_TOLERANSI_TERLAMBAT_MENIT_ + ' menit (sudah disertai jam scan, jam jadwal, dan menit telat); ' +
     'orang terlambat tetap tercatat hadir dan JANGAN dihitung tidak masuk. Untuk "siapa yang terlambat hari ini" lihat harian pada tanggal = tanggalHariIni; ' +
     'jika daftar terlambat hari itu tidak ada, jawab bahwa tidak ada yang terlambat, kecuali adaDataJamScan=false atau belum ada yang scan hari itu — ' +
     'maka katakan data jam scan belum tersedia sehingga keterlambatan belum bisa dipastikan. ' +
