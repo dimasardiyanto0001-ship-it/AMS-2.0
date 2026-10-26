@@ -101,6 +101,27 @@ function callGeminiAI_(promptText, systemInstruction) {
 /** Kode Realisasi -> kunci status harian (kode '1' = hadir, '2' = hadir + lembur ditangani terpisah). */
 const AI_STATUS_KEY_ = { 'A': 'alfa', 'I': 'izin', 'S': 'sakit', 'C': 'cuti', 'OFF': 'off' };
 
+/** "07:05" / "7:05" -> menit sejak 00:00; selain itu null. */
+function aiJamKeMenit_(s) {
+  const m = String(s || '').trim().match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  const h = Number(m[1]), mm = Number(m[2]);
+  return (h > 23 || mm > 59) ? null : h * 60 + mm;
+}
+
+/**
+ * Menit keterlambatan = scan masuk - jam masuk shift (>0 = terlambat, <=0 = tepat waktu/lebih awal).
+ * Selisih dibungkus ke -12..+12 jam supaya shift malam yang scan melewati tengah malam tetap benar.
+ */
+function aiMenitTerlambat_(jamMasukShift, jamScanMasuk) {
+  const a = aiJamKeMenit_(jamMasukShift), s = aiJamKeMenit_(jamScanMasuk);
+  if (a === null || s === null) return null;
+  let diff = s - a;
+  if (diff < -720) diff += 1440;
+  if (diff > 720) diff -= 1440;
+  return diff;
+}
+
 /**
  * Data harian dari Realisasi (+ Jadwal untuk mendeteksi sel yang belum diisi):
  *  - harian: per tanggal -> daftar nama per status
@@ -114,11 +135,18 @@ function buildAIDailyContext_(data) {
   const jadwalByName = {};
   (data.jadwal || []).forEach(e => { jadwalByName[nameKey_(e.nama)] = e.days || []; });
 
+  // Jam scan (finger / absen online) per orang + jam masuk standar tiap kode shift -> deteksi terlambat.
+  const scanByName = {};
+  (data.jamScan || []).forEach(e => { scanByName[nameKey_(e.nama)] = e.days || []; });
+  const shiftJam = {};
+  Object.keys(data.shiftCodes || {}).forEach(k => { shiftJam[String(k).toUpperCase()] = (data.shiftCodes[k] || {}).jamMasuk || ''; });
+  let adaDataScan = false;
+
   const harian = [];
   for (let i = 0; i < dayCount; i++) {
     harian.push({
       tanggal: i + 1, hari: dayNames[i] || '',
-      hadir: [], lembur: [], alfa: [], izin: [], sakit: [], cuti: [], off: [], belumDiisi: [], lainnya: []
+      hadir: [], lembur: [], terlambat: [], alfa: [], izin: [], sakit: [], cuti: [], off: [], belumDiisi: [], lainnya: []
     });
   }
 
@@ -128,16 +156,24 @@ function buildAIDailyContext_(data) {
     if (!nama) return;
     const days = emp.days || [];
     const jDays = jadwalByName[nameKey_(nama)] || [];
-    const tdk = { nama: nama, alfa: [], izin: [], sakit: [], cuti: [] };
+    const tdk = { nama: nama, alfa: [], izin: [], sakit: [], cuti: [], terlambat: [] };
+    const scanDays = scanByName[nameKey_(nama)] || [];
 
     for (let i = 0; i < dayCount; i++) {
       const code = cellCode_(days[i]);
       const d = harian[i];
-      if (code === '1') {
+      if (code === '1' || code === '2') {
         d.hadir.push(nama);
-      } else if (code === '2') {
-        d.hadir.push(nama);
-        d.lembur.push(nama);
+        if (code === '2') d.lembur.push(nama);
+        const scan = splitScanPair_(scanDays[i]);
+        if (scan.masuk) {
+          adaDataScan = true;
+          const menit = aiMenitTerlambat_(shiftJam[cellCode_(jDays[i])], scan.masuk);
+          if (menit !== null && menit > 0) {
+            d.terlambat.push(nama + ' (masuk ' + scan.masuk + ', jadwal ' + shiftJam[cellCode_(jDays[i])] + ', telat ' + menit + ' menit)');
+            tdk.terlambat.push(i + 1);
+          }
+        }
       } else if (AI_STATUS_KEY_[code]) {
         const key = AI_STATUS_KEY_[code];
         d[key].push(nama);
@@ -149,17 +185,17 @@ function buildAIDailyContext_(data) {
         d.lainnya.push(nama + ' (' + code + ')');
       }
     }
-    if (tdk.alfa.length || tdk.izin.length || tdk.sakit.length || tdk.cuti.length) perKaryawan.push(tdk);
+    if (tdk.alfa.length || tdk.izin.length || tdk.sakit.length || tdk.cuti.length || tdk.terlambat.length) perKaryawan.push(tdk);
   });
 
   harian.forEach(d => {
     Object.keys(d).forEach(k => { if (Array.isArray(d[k]) && d[k].length === 0) delete d[k]; });
   });
   perKaryawan.forEach(p => {
-    ['alfa', 'izin', 'sakit', 'cuti'].forEach(k => { if (p[k].length === 0) delete p[k]; });
+    ['alfa', 'izin', 'sakit', 'cuti', 'terlambat'].forEach(k => { if (p[k].length === 0) delete p[k]; });
   });
 
-  return { harian: harian, perKaryawan: perKaryawan };
+  return { harian: harian, perKaryawan: perKaryawan, adaDataScan: adaDataScan };
 }
 
 /** Ringkasan data periode aktif yang dikirim ke AI sebagai konteks (bukan seluruh raw sheet). */
@@ -173,6 +209,7 @@ function buildAIDataContext_() {
     dashboard: data.dashboard,
     harian: daily.harian,
     perKaryawan: daily.perKaryawan,
+    adaDataJamScan: daily.adaDataScan,
     rekap: (data.rekap || []).map(r => ({
       nama: r.nama, jabatan: r.jabatan, hadir: r.hadir, alfa: r.alfa,
       izin: r.izin, sakit: r.sakit, cuti: r.cuti, off: r.off,
@@ -215,8 +252,12 @@ function chatWithAI(pesan, token) {
     'Gunakan action "kirim_email" HANYA jika user secara eksplisit minta data dikirim/di-email. ' +
     'Kalau user tidak sebutkan tanggal, tglMulai=1 dan tglAkhir=dayCount (jumlah hari periode, ada di data konteks). ' +
     'Kalau user tidak sebutkan alamat email, isi tujuanEmail dengan null. ' +
-    'DATA HARIAN: "harian" berisi per tanggal daftar nama untuk status hadir, lembur, alfa, izin, sakit, cuti, off, belumDiisi, lainnya ' +
+    'DATA HARIAN: "harian" berisi per tanggal daftar nama untuk status hadir, lembur, terlambat, alfa, izin, sakit, cuti, off, belumDiisi, lainnya ' +
     '(status yang tidak ada orangnya tidak ditulis). "perKaryawan" berisi daftar tanggal alfa/izin/sakit/cuti per orang. ' +
+    '"terlambat" = karyawan hadir yang jam scan masuknya melewati jam masuk shift (sudah disertai jam scan, jam jadwal, dan menit telat); ' +
+    'orang terlambat tetap tercatat hadir dan JANGAN dihitung tidak masuk. Untuk "siapa yang terlambat hari ini" lihat harian pada tanggal = tanggalHariIni; ' +
+    'jika daftar terlambat hari itu tidak ada, jawab bahwa tidak ada yang terlambat, kecuali adaDataJamScan=false atau belum ada yang scan hari itu — ' +
+    'maka katakan data jam scan belum tersedia sehingga keterlambatan belum bisa dipastikan. ' +
     '"Tidak masuk" berarti alfa + izin + sakit + cuti; "off" adalah libur terjadwal, sebutkan terpisah dan jangan dihitung tidak masuk. ' +
     '"belumDiisi" = dijadwalkan masuk tetapi realisasi masih kosong; untuk tanggal setelah tanggalHariIni artinya belum terjadi, bukan tidak masuk. ' +
     'Untuk pertanyaan per tanggal atau per orang, sebutkan SEMUA nama/tanggal yang relevan beserta jumlahnya dan jangan dipotong. ' +
