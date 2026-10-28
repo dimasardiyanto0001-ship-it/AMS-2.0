@@ -233,3 +233,62 @@ function addShiftJamKerja(kodeShift, label, jamMasuk, jamPulang, targetJam, toke
   catatAuditLog_(session, 'Tambah Shift Baru', 'Setting Jam Kerja', kodeShift, 'Label: ' + label + ', Target: ' + targetOk + ' jam');
   return result;
 }
+
+/**
+ * Hapus kode shift (Super Admin), mis. karena salah input.
+ *  - Ditolak bila kode masih dipakai di PolaShift (ubah/hapus polanya dulu).
+ *  - Bila kode masih dipakai di sel Jadwal periode aktif, kembalikan {perluKonfirmasi:true, jumlahSel, jumlahKaryawan}
+ *    dan TIDAK mengubah apa pun; panggil ulang dengan hapusJadwal=true untuk mengosongkan sel-sel itu lalu menghapus shift.
+ *  - Arsip periode lama, Realisasi, JamKerja, dan JamScan tidak disentuh.
+ * Hasil sukses: {perluKonfirmasi:false, list:[...setting terbaru], jadwalDikosongkan:n}.
+ */
+function deleteShiftJamKerja(kodeShift, hapusJadwal, token) {
+  const session = requireSuperAdmin_(token, 'Hanya Super Admin yang boleh menghapus shift.');
+  kodeShift = String(kodeShift || '').trim().toUpperCase();
+  if (!kodeShift) throw new Error('Kode shift wajib diisi.');
+  if (kodeShift === 'OFF') throw new Error('Kode "OFF" (Libur) adalah kode sistem dan tidak bisa dihapus.');
+
+  const hasil = withScriptLock_(() => {
+    const sheet = getOrCreateSettingJamKerjaSheet_();
+    const lastRow = sheet.getLastRow();
+    const kodeCol = lastRow >= 2 ? sheet.getRange(2, 1, lastRow - 1, 1).getValues() : [];
+    const idx = kodeCol.findIndex(r => String(r[0]).trim().toUpperCase() === kodeShift);
+    if (idx === -1) throw new Error('Kode shift "' + kodeShift + '" tidak ditemukan.');
+
+    // 1) Dipakai di pola rotasi?
+    const polaPakai = readPolaShiftRows_()
+      .filter(p => String(p.urutanKode).toUpperCase().split(/[^A-Z0-9]+/).indexOf(kodeShift) !== -1)
+      .map(p => p.namaPola);
+    if (polaPakai.length) {
+      throw new Error('Shift "' + kodeShift + '" masih dipakai di pola: ' + polaPakai.join(', ') + '. Ubah atau hapus pola itu dulu di Setting Jadwal Kerja.');
+    }
+
+    // 2) Dipakai di Jadwal periode aktif?
+    const jadwalSheet = getSpreadsheet_().getSheetByName(CONFIG.SHEET_JADWAL);
+    const sel = [];
+    const karyawan = {};
+    if (jadwalSheet) {
+      readGridFromSheetObj_(jadwalSheet).employees.forEach(e => {
+        e.days.forEach((v, i) => {
+          if (cellCode_(v) === kodeShift) {
+            sel.push(jadwalSheet.getRange(e.rowIndex, CONFIG.FIRST_DAY_COL + i).getA1Notation());
+            karyawan[nameKey_(e.nama)] = true;
+          }
+        });
+      });
+    }
+    if (sel.length && hapusJadwal !== true) {
+      return { perluKonfirmasi: true, jumlahSel: sel.length, jumlahKaryawan: Object.keys(karyawan).length };
+    }
+
+    if (sel.length) jadwalSheet.getRangeList(sel).clearContent();
+    sheet.deleteRow(idx + 2);
+    SpreadsheetApp.flush();
+    return { perluKonfirmasi: false, list: readSettingJamKerjaRows_(), jadwalDikosongkan: sel.length };
+  }, 20000);
+
+  if (!hasil.perluKonfirmasi) {
+    catatAuditLog_(session, 'Hapus Shift', 'Setting Jam Kerja', kodeShift, 'Sel Jadwal dikosongkan: ' + hasil.jadwalDikosongkan);
+  }
+  return hasil;
+}
