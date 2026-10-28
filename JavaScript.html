@@ -60,6 +60,7 @@
   getJamKerjaSettings: ['token'],
   setJamKerjaSettings: ['settings', 'token'],
   addShiftJamKerja: ['kodeShift', 'label', 'jamMasuk', 'jamPulang', 'targetJam', 'token'],
+  deleteShiftJamKerja: ['kodeShift', 'hapusJadwal', 'token'],
   getPolaShiftList: ['token'],
   addPolaShift: ['namaPola', 'urutanKode', 'deskripsi', 'token'],
   deletePolaShift: ['namaPola', 'token'],
@@ -3689,7 +3690,7 @@ function loadJamKerjaSettings() {
 
 function renderJamKerjaSettingsForm() {
   const canEdit = !!SESSION && SESSION.role === 'Super Admin';
-  let html = '<table><thead><tr><th>Kode Shift</th><th>Label</th><th>Jam Masuk</th><th>Jam Pulang</th><th>Target Jam/Hari</th></tr></thead><tbody>';
+  let html = '<table><thead><tr><th>Kode Shift</th><th>Label</th><th>Jam Masuk</th><th>Jam Pulang</th><th>Target Jam/Hari</th>' + (canEdit ? '<th>Aksi</th>' : '') + '</tr></thead><tbody>';
   JAMKERJA_SETTINGS_DATA.forEach(s => {
     html += `<tr data-kode="${escapeHtml(s.kodeShift)}">
       <td><strong>${escapeHtml(s.kodeShift)}</strong></td>
@@ -3697,6 +3698,7 @@ function renderJamKerjaSettingsForm() {
       <td><input type="time" class="jk-jam-masuk" value="${escapeHtml(s.jamMasuk)}" ${canEdit ? '' : 'disabled'}></td>
       <td><input type="time" class="jk-jam-pulang" value="${escapeHtml(s.jamPulang)}" ${canEdit ? '' : 'disabled'}></td>
       <td><input type="number" step="0.5" min="0" class="jk-target-jam" value="${s.targetJam}" style="width:70px;" ${canEdit ? '' : 'disabled'}></td>
+      ${canEdit ? `<td><button class="btn btn-danger" data-kode="${escapeHtml(s.kodeShift)}" onclick="hapusShiftJamKerja(this.dataset.kode)">🗑 Hapus</button></td>` : ''}
     </tr>`;
   });
   html += '</tbody></table>';
@@ -3747,6 +3749,26 @@ function saveJamKerjaSettings() {
       toast('Gagal menyimpan: ' + err.message, true);
     })
     .setJamKerjaSettings(settings, SESSION.token);
+}
+
+function hapusShiftJamKerja(kode, konfirmasi) {
+  if (!SESSION || SESSION.role !== 'Super Admin') return;
+  if (!konfirmasi && !confirm('Hapus shift "' + kode + '" dari Setting Jam Kerja?')) return;
+  google.script.run
+    .withSuccessHandler(res => {
+      if (res && res.perluKonfirmasi) {
+        if (confirm('Shift "' + kode + '" dipakai di Jadwal periode aktif: ' + res.jumlahSel + ' sel pada ' + res.jumlahKaryawan + ' karyawan.\n\nLanjut hapus? Sel-sel itu akan DIKOSONGKAN (perlu diisi ulang). Arsip periode lama tidak berubah.')) {
+          hapusShiftJamKerja(kode, true);
+        }
+        return;
+      }
+      JAMKERJA_SETTINGS_DATA = (res && res.list) || [];
+      renderJamKerjaSettingsForm();
+      toast('Shift "' + kode + '" dihapus' + (res && res.jadwalDikosongkan ? ' (' + res.jadwalDikosongkan + ' sel Jadwal dikosongkan). Muat ulang data untuk melihat jadwal terbaru.' : '.'));
+      if (res && res.jadwalDikosongkan && typeof loadData === 'function') loadData(false);
+    })
+    .withFailureHandler(err => toast('Gagal menghapus shift: ' + err.message, true))
+    .deleteShiftJamKerja(kode, konfirmasi === true, SESSION.token);
 }
 
 function tambahShiftBaru() {

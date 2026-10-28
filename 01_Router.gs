@@ -82,6 +82,7 @@ const ROUTES = {
   getJamKerjaSettings: { fn: 'getJamKerjaSettings', args: ['token'] },
   setJamKerjaSettings: { fn: 'setJamKerjaSettings', args: ['settings', 'token'] },
   addShiftJamKerja: { fn: 'addShiftJamKerja', args: ['kodeShift', 'label', 'jamMasuk', 'jamPulang', 'targetJam', 'token'] },
+  deleteShiftJamKerja: { fn: 'deleteShiftJamKerja', args: ['kodeShift', 'hapusJadwal', 'token'] },
 
   /* ---- POLA SHIFT (Setting Jadwal Kerja) ---- */
   getPolaShiftList: { fn: 'getPolaShiftList', args: ['token'] },
