@@ -162,8 +162,11 @@ function applyFingerRowsToRealisasi_(rows) {
     ') — pencocokan untuk NIK ini otomatis dialihkan ke pencocokan nama.'
   );
 
+  let pulangTanpaMasukDilewati = 0;
+
   withScriptLock_(() => {
-    rows.forEach(row => {
+    // Urut per tanggal supaya baris hari sebelumnya diproses lebih dulu (dipakai aturan pulang pagi di bawah).
+    rows.slice().sort((a, b) => a.dayOfMonth - b.dayOfMonth).forEach(row => {
       const idx = resolveFingerRowIdx_(row, nikToIdx, names);
       if (idx === -1) {
         const fingerNik = String(row.nik || '').trim();
@@ -175,6 +178,22 @@ function applyFingerRowsToRealisasi_(rows) {
       const dayIdx = row.dayOfMonth - 1;
       if (dayIdx < 0 || dayIdx >= dayCount) {
         outOfRangeDay.push(row.nama + ' (tanggal ' + row.dayOfMonth + ')');
+        return;
+      }
+
+      // Scan Pulang TANPA scan Masuk di hari yang sama = pulang pagi dari shift malam kemarin, bukan hari kerja baru.
+      // Tidak mengisi Realisasi hari ini (kalau tidak, hari libur sesudah shift malam ikut terbaca "Hadir").
+      // Bila kemarin ada Masuk tanpa Pulang, scan ini dipasangkan ke kemarin.
+      if (!row.scanMasuk && row.scanPulang) {
+        if (dayIdx > 0) {
+          const prev = splitScanPair_(jamScanGrid[idx][dayIdx - 1]);
+          if (prev.masuk && !prev.keluar && menitDariJam_(row.scanPulang) < menitDariJam_(prev.masuk)) {
+            jamScanGrid[idx][dayIdx - 1] = formatScanPair_(prev.masuk, row.scanPulang);
+            const jam = hitungDurasiJamKerja_(prev.masuk, row.scanPulang);
+            if (jam > 0 && jam <= JAM_KERJA_MAKS_ && !jamKerjaGrid[idx][dayIdx - 1]) jamKerjaGrid[idx][dayIdx - 1] = round2_(jam);
+          }
+        }
+        pulangTanpaMasukDilewati++;
         return;
       }
 
@@ -201,5 +220,5 @@ function applyFingerRowsToRealisasi_(rows) {
     SpreadsheetApp.flush();
   }, 20000);
 
-  return { filled, filledOvertime, overwritten, skippedAlreadyFilled, notFound, outOfRangeDay, duplicateNik: duplicateNikWarnings };
+  return { filled, filledOvertime, overwritten, skippedAlreadyFilled, notFound, outOfRangeDay, duplicateNik: duplicateNikWarnings, pulangTanpaMasukDilewati };
 }
