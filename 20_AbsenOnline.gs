@@ -324,10 +324,16 @@ function tulisAbsenKeRekap_(realisasiSheet, rowNum, now, jenis, jamStr) {
       if (jam > 0 && jam <= JAM_KERJA_MAKS_) {
         prevCell.setValue(formatScanPair_(prev.masuk, jamStr));
         tulisJamKerja_(ss, rowNum, prevCol, jam);
+        tandaiLemburBilaPerlu_(ss, realisasiSheet, rowNum, prevCol, jam);
         return;
       }
     }
   }
+
+  // Pulang tanpa Masuk di hari yang sama (dan bukan penutup shift malam kemarin) TIDAK mengisi Realisasi
+  // hari ini: kalau tidak, Pulang shift malam (mis. 22:00-06:00) membuat hari berikutnya ikut terbaca hadir
+  // padahal belum absen Masuk. Absen tetap tercatat di LogAbsenOnline.
+  if (jenis === 'Pulang' && !existing.masuk) return;
 
   // --- Alur biasa (shift dalam satu hari) ---
   const currentVal = realisasiSheet.getRange(rowNum, col).getValue();
@@ -344,8 +350,31 @@ function tulisAbsenKeRekap_(realisasiSheet, rowNum, now, jenis, jamStr) {
   // Jam kerja terhitung ditulis ke JamKerja saat absen Pulang (bila Masuk-nya ada).
   if (jenis === 'Pulang' && masuk && keluar) {
     const jam = hitungDurasiJamKerja_(masuk, keluar);
-    if (jam > 0 && jam <= JAM_KERJA_MAKS_) tulisJamKerja_(ss, rowNum, col, jam);
+    if (jam > 0 && jam <= JAM_KERJA_MAKS_) {
+      tulisJamKerja_(ss, rowNum, col, jam);
+      tandaiLemburBilaPerlu_(ss, realisasiSheet, rowNum, col, jam);
+    }
   }
+}
+
+/**
+ * Lembur otomatis, sama aturannya dengan upload finger: jam kerja melebihi target jam shift hari itu
+ * (SettingJamKerja; default 8) sebesar >= CONFIG.LEMBUR_MIN_HOURS -> Realisasi hari itu jadi 2.
+ * Kode S/I/C/A tidak ditimpa.
+ */
+function tandaiLemburBilaPerlu_(ss, realisasiSheet, rowNum, col, jamKerja) {
+  let target = 8;
+  try {
+    const jadwalSheet = ss.getSheetByName(CONFIG.SHEET_JADWAL);
+    const kode = jadwalSheet ? String(jadwalSheet.getRange(rowNum, col).getValue() || '').trim().toUpperCase() : '';
+    const info = kode && kode !== 'OFF' ? getShiftCodesDynamic_()[kode] : null;
+    if (info && isFinite(Number(info.targetJam))) target = Number(info.targetJam);
+  } catch (e) { /* jadwal tak terbaca: pakai target default */ }
+  if (jamKerja - target < CONFIG.LEMBUR_MIN_HOURS) return;
+
+  const cell = realisasiSheet.getRange(rowNum, col);
+  const code = String(cell.getValue() === null ? '' : cell.getValue()).trim().toUpperCase();
+  if (code === '' || code === '1') cell.setValue(2);
 }
 
 /** Tulis jam kerja (jam, dibulatkan 2 desimal) ke sheet JamKerja pada baris/kolom tertentu. */
