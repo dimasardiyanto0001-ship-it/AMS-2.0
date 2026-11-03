@@ -269,6 +269,11 @@
             </p>
           `;
         }
+        if (result.persetujuanJadwal) {
+          html = '<p class="muted"><strong>Diajukan ke HOD.</strong> ' + (result.persetujuanJadwal.menunggu
+            ? result.persetujuanJadwal.jumlahSel + ' sel pada ' + result.persetujuanJadwal.jumlahKaryawan + ' karyawan menunggu persetujuan; Jadwal berubah setelah disetujui.'
+            : 'Tidak ada perubahan nyata.') + '</p>';
+        }
         document.getElementById('sjkHasilGenerate').innerHTML = html;
       })
       .withFailureHandler(err => {

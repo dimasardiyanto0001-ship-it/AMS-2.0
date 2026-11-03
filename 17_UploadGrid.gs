@@ -12,10 +12,12 @@ const UPLOAD_ERR_XLSX_ = 'Gagal membaca file Excel. Pastikan file berformat .xls
 
 function uploadJadwal(base64Data, filename, token) {
   return uploadGridFile_(token, base64Data, filename || 'upload_jadwal.xlsx', {
-    roleError: 'Hanya akun dengan role "Super Admin" yang boleh upload jadwal baru.',
+    roleError: 'Hanya akun dengan role "Super Admin" atau "Admin" yang boleh upload jadwal baru.',
     sheetName: CONFIG.SHEET_JADWAL,
     validCodes: () => getShiftCodesDynamic_(),
-    auditAction: 'Upload Jadwal'
+    auditAction: 'Upload Jadwal',
+    allowAdmin: true,
+    stageForApproval: true   // Admin: perubahan menunggu persetujuan HOD, Super Admin: langsung berlaku
   });
 }
 
@@ -35,16 +37,28 @@ function uploadGridFile_(token, base64Data, filename, opts) {
     : requireSuperAdmin_(token, opts.roleError);
   if (!base64Data) throw new Error('File tidak ditemukan / kosong.');
 
+  const stage = !!opts.stageForApproval && !isSuperAdminRole_(session.role);
+
   const applyResult = withTempSpreadsheet_(base64Data, filename, '_TEMP_UPLOAD_', MIME_XLSX_, UPLOAD_ERR_XLSX_, fileId => {
     const imported = readImportedGrid_(fileId, opts.sheetName);
-    return applyGridImport_(opts.sheetName, imported, opts.validCodes());
+    return stage
+      ? computeGridImportChanges_(opts.sheetName, imported, opts.validCodes())
+      : applyGridImport_(opts.sheetName, imported, opts.validCodes());
   });
 
-  catatAuditLog_(session, opts.auditAction, opts.sheetName, filename,
-    applyResult.matched + ' karyawan cocok, ' + applyResult.notFound.length + ' nama tidak ditemukan, ' +
-    applyResult.invalidCodes.length + ' kode tidak valid');
+  let persetujuan = null;
+  if (stage) {
+    persetujuan = ajukanPerubahanJadwal_(session, applyResult.changes, 'Upload Jadwal: ' + filename,
+      applyResult.matched + ' karyawan cocok, ' + applyResult.notFound.length + ' nama tidak ditemukan, ' +
+      applyResult.invalidCodes.length + ' kode tidak valid');
+  } else {
+    catatAuditLog_(session, opts.auditAction, opts.sheetName, filename,
+      applyResult.matched + ' karyawan cocok, ' + applyResult.notFound.length + ' nama tidak ditemukan, ' +
+      applyResult.invalidCodes.length + ' kode tidak valid');
+  }
 
   const result = getAllDataInternal_();
+  if (persetujuan) result.persetujuanJadwal = persetujuan;
   result.uploadInfo = {
     matched: applyResult.matched,
     notFound: applyResult.notFound,
@@ -130,6 +144,33 @@ function applyGridImport_(targetSheetName, imported, validCodeMap) {
   }, 20000);
 
   return { matched: matched, notFound: notFound, invalidCodes: invalidCodes };
+}
+
+/**
+ * Seperti applyGridImport_ tetapi TIDAK menulis: hanya menghitung sel yang berbeda dari sheet target.
+ * @return {{matched, notFound, invalidCodes, changes: Array<{nama, day, kode}>}}
+ */
+function computeGridImportChanges_(targetSheetName, imported, validCodeMap) {
+  const targetSheet = getSheet_(targetSheetName);
+  const numRows = getLastEmployeeRow_(targetSheet) - CONFIG.DATA_START_ROW + 1;
+  if (numRows <= 0) throw new Error('Sheet ' + targetSheetName + ' belum berisi karyawan.');
+  const dayCountToWrite = Math.min(imported.dayCount, getDayColCount_(targetSheet));
+  const currentNames = targetSheet.getRange(CONFIG.DATA_START_ROW, 2, numRows, 1).getValues().map(r => nameKey_(r[0] || ''));
+
+  let matched = 0;
+  const notFound = [], invalidCodes = [], changes = [];
+  imported.info.forEach((row, i) => {
+    const nama = String(row[1] || '').trim();
+    if (!nama) return;
+    if (currentNames.indexOf(nama.toLowerCase()) === -1) { notFound.push(nama); return; }
+    matched++;
+    imported.grid[i].slice(0, dayCountToWrite).forEach((raw, dayIdx) => {
+      const kode = (raw === null || raw === undefined) ? '' : String(raw).trim().toUpperCase();
+      if (kode === '' || validCodeMap.hasOwnProperty(kode)) changes.push({ nama: nama, day: dayIdx, kode: kode });
+      else invalidCodes.push({ nama: nama, hariKe: dayIdx + 1, kode: kode });
+    });
+  });
+  return { matched: matched, notFound: notFound, invalidCodes: invalidCodes, changes: changes };
 }
 
 /* ============================ TEMPLATE ============================ */

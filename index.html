@@ -108,6 +108,7 @@
       <button class="tab-btn sub" data-tab="logabsensi"><span class="tab-icon">🧾</span><span>Log Absensi</span></button>
       <button class="tab-btn sub" data-tab="relieverdata"><span class="tab-icon">🤝</span><span>Data Reliever</span></button>
       <button class="tab-btn sub" data-tab="pengajuanizin"><span class="tab-icon">📝</span><span>Pengajuan Izin</span><span class="nav-badge hidden" id="pengajuanBadge">0</span></button>
+      <button class="tab-btn sub" data-tab="persetujuanjadwal"><span class="tab-icon">✅</span><span>Persetujuan Jadwal</span><span class="nav-badge hidden" id="persetujuanJadwalBadge">0</span></button>
     </div>
   </div>
 
@@ -525,6 +526,43 @@
     </div>
   </div>
 </div>
+<!-- ============ TAB: PERSETUJUAN JADWAL ============ -->
+<section id="tab-persetujuanjadwal" class="tab-content">
+  <div class="panel">
+    <div class="panel-header">
+      <h3>Persetujuan Jadwal</h3>
+      <div class="header-actions">
+        <div class="filter-group">
+          <label for="pjStatusFilter">Status:</label>
+          <select id="pjStatusFilter" onchange="loadPersetujuanJadwal_()">
+            <option value="Pending" selected>Pending</option>
+            <option value="Approved">Approved</option>
+            <option value="Rejected">Rejected</option>
+            <option value="Dibatalkan">Dibatalkan</option>
+            <option value="ALL">Semua</option>
+          </select>
+        </div>
+        <button class="btn btn-ghost" onclick="loadPersetujuanJadwal_()">⟳ Refresh</button>
+      </div>
+    </div>
+    <p class="muted" id="pjHint">Perubahan Jadwal dari Supervisor (edit, upload Excel, generate Pola) tidak langsung berlaku. Jadwal baru berubah setelah HOD menekan Approve.</p>
+    <div id="pjWrap" class="table-wrap"></div>
+  </div>
+</section>
+
+<!-- Popup rincian perubahan Jadwal -->
+<div id="pjDetailPicker" class="picker hidden">
+  <div class="picker-box" style="max-width:720px;width:94vw;">
+    <div class="picker-title" id="pjDetailTitle">Rincian Perubahan Jadwal</div>
+    <div id="pjDetailBody" style="max-height:60vh;overflow:auto;"></div>
+    <div class="picker-actions">
+      <button class="btn btn-add hidden" id="pjDetailApprove">✔ Approve</button>
+      <button class="btn btn-danger hidden" id="pjDetailReject">✘ Reject</button>
+      <button class="btn btn-ghost" id="pjDetailClose">Tutup</button>
+    </div>
+  </div>
+</div>
+
 <!-- ============ TAB: KEPEGAWAIAN - DAFTAR KARYAWAN ============ -->
     <section id="tab-daftarkaryawan" class="tab-content">
       <div class="panel">

@@ -245,7 +245,9 @@ function modPositif_(n, m) {
  * Hanya Super Admin. Hasil: state penuh (getAllDataInternal_) + generateJadwalInfo.
  */
 function generateJadwalDariPola(mode, token) {
-  const session = requireSuperAdmin_(token, 'Hanya akun dengan role "Super Admin" yang boleh generate Jadwal dari Pola.');
+  const session = requireUploadAccess_(token, 'Hanya akun dengan role "Super Admin" atau "Admin" yang boleh generate Jadwal dari Pola.');
+  const stage = !isSuperAdminRole_(session.role);   // Admin: hasil generate menunggu persetujuan HOD
+  const stagedChanges = [];
   mode = (mode === 'timpaSemua') ? 'timpaSemua' : 'kosongSaja';
 
   const jadwalSheet = getSheet_(CONFIG.SHEET_JADWAL);
@@ -306,25 +308,33 @@ function generateJadwalDariPola(mode, token) {
           kode = urutan[modPositif_(dayNumber - 1 + assign.offsetHari, urutan.length)];
         }
         grid[i][d] = kode;
+        if (stage) stagedChanges.push({ nama: nama, day: d, kode: kode });
         info.selDiisi++;
       }
     }
 
-    if (info.selDiisi > 0) {
+    if (info.selDiisi > 0 && !stage) {
       gridRange.setValues(grid);
       SpreadsheetApp.flush();
     }
   }, 20000);
 
-  // Di luar lock: syncOffFromJadwal_ memakai lock-nya sendiri.
-  syncOffFromJadwal_();
+  let persetujuan = null;
+  if (stage) {
+    persetujuan = ajukanPerubahanJadwal_(session, stagedChanges, 'Generate Jadwal dari Pola (' + mode + ')',
+      info.karyawanDigenerate + ' karyawan, ' + info.selDiisi + ' sel');
+  } else {
+    // Di luar lock: syncOffFromJadwal_ memakai lock-nya sendiri.
+    syncOffFromJadwal_();
 
-  catatAuditLog_(
-    session, 'Generate Jadwal dari Pola', 'Jadwal', periodText,
-    'Mode: ' + mode + ', ' + info.karyawanDigenerate + ' karyawan, ' + info.selDiisi + ' sel diisi, ' + info.selDilewati + ' sel dilewati'
-  );
+    catatAuditLog_(
+      session, 'Generate Jadwal dari Pola', 'Jadwal', periodText,
+      'Mode: ' + mode + ', ' + info.karyawanDigenerate + ' karyawan, ' + info.selDiisi + ' sel diisi, ' + info.selDilewati + ' sel dilewati'
+    );
+  }
 
   const result = getAllDataInternal_();
+  if (persetujuan) result.persetujuanJadwal = persetujuan;
   result.generateJadwalInfo = {
     mode: info.mode,
     karyawanDigenerate: info.karyawanDigenerate,

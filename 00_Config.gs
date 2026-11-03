@@ -119,7 +119,8 @@ const MENU_LIST = [
   { key: 'settingauditlog',    label: 'Setting - Audit Log' },
   { key: 'exportsheetpdf',     label: 'Export PDF Sheet (Rekap/Dashboard/Jadwal/Realisasi)' },
   { key: 'templatejadwal',     label: 'Download Template Jadwal' },
-  { key: 'pengajuanizin',      label: 'Pengajuan Izin' }
+  { key: 'pengajuanizin',      label: 'Pengajuan Izin' },
+  { key: 'persetujuanjadwal',  label: 'Persetujuan Jadwal' }
 ];
 
 const REPORT_TYPE_TO_MENU = {
