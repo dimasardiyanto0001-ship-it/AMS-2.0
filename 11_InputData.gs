@@ -148,6 +148,14 @@ function saveJadwal(rowIndex, dayIndex, kode, token) {
   }
   dayIndex = Number(dayIndex);
 
+  // Supervisor (Admin): perubahan masuk antrean Persetujuan Jadwal, belum ditulis ke sheet.
+  if (!isSuperAdminRole_(session.role)) {
+    const info = ajukanJadwalDariSel_(session, [{ rowIndex: rowIndex, dayIndex: dayIndex, kode: kode }], 'Edit sel jadwal');
+    const pending = getAllDataInternal_(true);
+    pending.persetujuanJadwal = info;
+    return pending;
+  }
+
   withScriptLock_(() => {
     const sheet = getSheet_(CONFIG.SHEET_JADWAL);
     validateCellTarget_(sheet, rowIndex, dayIndex);
@@ -194,6 +202,14 @@ function saveJadwalBatch(updates, token) {
   if (updates.length === 0) return getAllDataInternal_();
   if (updates.length > JADWAL_BATCH_MAX_) {
     throw new Error('Terlalu banyak sel dalam satu batch (maks ' + JADWAL_BATCH_MAX_ + ').');
+  }
+
+  // Supervisor (Admin): perubahan masuk antrean Persetujuan Jadwal, belum ditulis ke sheet.
+  if (!isSuperAdminRole_(session.role)) {
+    const info = ajukanJadwalDariSel_(session, updates, 'Edit batch manual');
+    const pending = getAllDataInternal_(true);
+    pending.persetujuanJadwal = info;
+    return pending;
   }
 
   let summary = null;

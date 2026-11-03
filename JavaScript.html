@@ -44,6 +44,12 @@
   saveRealisasiBatch: ['updates', 'token'],
   saveJadwal: ['rowIndex', 'dayIndex', 'kode', 'token'],
   saveJadwalBatch: ['updates', 'token'],
+  getPersetujuanJadwalList: ['status', 'token'],
+  getPersetujuanJadwalPendingCount: ['token'],
+  getPersetujuanJadwalDetail: ['id', 'token'],
+  approvePersetujuanJadwal: ['id', 'token'],
+  rejectPersetujuanJadwal: ['id', 'catatan', 'token'],
+  batalkanPersetujuanJadwal: ['id', 'token'],
   uploadJadwal: ['base64Data', 'filename', 'token'],
   uploadRealisasi: ['base64Data', 'filename', 'token'],
   uploadFingerAbsen: ['base64Data', 'filename', 'token'],
@@ -236,6 +242,7 @@ document.addEventListener('DOMContentLoaded', () => {
 const TAB_TITLES_ = {
   dashboard: 'Dashboard', jadwal: 'Jadwal Kerja', input: 'Input Realisasi',
   pengajuanizin: 'Pengajuan Izin', // ===== TAMBAHAN PENGAJUAN IZIN =====
+  persetujuanjadwal: 'Persetujuan Jadwal',
   rekap: 'Rekap Karyawan', logabsensi: 'Log Absensi', relieverdata: 'Data Reliever', daftarkaryawan: 'Daftar Karyawan', daftarreliever: 'Daftar Reliever',
   reportsummary: 'Summary Report', reportdetail: 'Detail Report',
   reportdept: 'Department Report', reportexception: 'Exception Report',
@@ -284,6 +291,7 @@ const TAB_TITLES_ = {
 
     if (tabName === 'daftarkaryawan') loadDaftarKaryawan();
     if (tabName === 'pengajuanizin') loadPengajuanList_(); // ===== TAMBAHAN PENGAJUAN IZIN =====
+    if (tabName === 'persetujuanjadwal') loadPersetujuanJadwal_();
     if (tabName.indexOf('report') === 0) initReportFilters_(tabName);
     if (tabName === 'settingaccount') loadUsersList();
     if (tabName === 'settingjamkerja') loadJamKerjaSettings();
@@ -2009,7 +2017,11 @@ function renderAvgJamKerjaSparkline_() {
         st.selected.clear();
         st.period = null;
         applyStateAndRerender_(data);
-        toast(updates.length + ' sel ' + cfg.label.toLowerCase() + ' tersimpan');
+        if (data && data.persetujuanJadwal) {
+          notifyJadwalDiajukan_(data.persetujuanJadwal);
+        } else {
+          toast(updates.length + ' sel ' + cfg.label.toLowerCase() + ' tersimpan');
+        }
       })
       .withFailureHandler(err => {
         st.saving = false;
@@ -2593,7 +2605,11 @@ function submitDeleteEmployee() {
           btn.textContent = 'Upload Jadwal';
           applyStateAndRerender_(data);
           const info = data.uploadInfo || { matched: 0, notFound: [] };
-          let msg = 'Jadwal terupdate: ' + info.matched + ' karyawan cocok.';
+          let msg = data.persetujuanJadwal
+            ? (data.persetujuanJadwal.menunggu
+                ? 'Jadwal diajukan ke HOD (' + data.persetujuanJadwal.jumlahSel + ' sel, ' + info.matched + ' karyawan cocok). Jadwal berubah setelah disetujui.'
+                : 'Tidak ada perubahan: isi file sama dengan Jadwal saat ini.')
+            : 'Jadwal terupdate: ' + info.matched + ' karyawan cocok.';
           if (info.notFound && info.notFound.length) {
             msg += ' Tidak ditemukan: ' + info.notFound.join(', ');
             toast(msg, true);
@@ -4022,6 +4038,165 @@ function onHakAksesViewToggle_(viewChk) {
       })
       .addRole(roleName, deskripsi, SESSION.token);}
 
+/* ============ PERSETUJUAN JADWAL (Supervisor mengajukan -> HOD Approve/Reject) ============ */
+
+let PJ_LIST_DATA = [];
+let pjDetailId_ = null;
+
+function isHod_() { return !!SESSION && SESSION.role === 'Super Admin'; }
+
+function notifyJadwalDiajukan_(info) {
+  if (info && info.menunggu) {
+    toast('Diajukan ke HOD: ' + info.jumlahSel + ' sel pada ' + info.jumlahKaryawan + ' karyawan. Jadwal berubah setelah disetujui (lihat menu Persetujuan Jadwal).');
+  } else {
+    toast('Tidak ada perubahan yang perlu diajukan (nilainya sama dengan Jadwal saat ini).');
+  }
+}
+
+function loadPersetujuanJadwalBadge_() {
+  if (!isHod_()) return;
+  google.script.run
+    .withSuccessHandler(res => {
+      const badge = document.getElementById('persetujuanJadwalBadge');
+      if (!badge) return;
+      const count = (res && res.count) || 0;
+      badge.textContent = count > 99 ? '99+' : String(count);
+      badge.classList.toggle('hidden', count === 0);
+    })
+    .withFailureHandler(() => { /* tidak kritikal */ })
+    .getPersetujuanJadwalPendingCount(SESSION.token);
+}
+
+function loadPersetujuanJadwal_() {
+  if (!canManageEmployee_()) return;
+  const wrap = document.getElementById('pjWrap');
+  if (wrap) wrap.innerHTML = '<p class="muted">⏳ Memuat pengajuan jadwal...</p>';
+  const hint = document.getElementById('pjHint');
+  if (hint && !isHod_()) hint.textContent = 'Daftar pengajuan Jadwal milik Anda. Jadwal berubah setelah HOD menekan Approve.';
+  const sel = document.getElementById('pjStatusFilter');
+  google.script.run
+    .withSuccessHandler(json => {
+      try { PJ_LIST_DATA = json ? JSON.parse(json) : []; } catch (e) { PJ_LIST_DATA = []; }
+      renderPersetujuanJadwal_();
+      loadPersetujuanJadwalBadge_();
+    })
+    .withFailureHandler(err => {
+      if (wrap) wrap.innerHTML = '<p style="color:#dc2626;">⚠ ' + escapeHtml(err.message) + '</p>';
+      if (isAuthError_(err.message)) doLogout();
+    })
+    .getPersetujuanJadwalList(sel ? sel.value : 'Pending', SESSION.token);
+}
+
+function renderPersetujuanJadwal_() {
+  const wrap = document.getElementById('pjWrap');
+  if (!wrap) return;
+  const cols = ['Diajukan Pada', 'Pengaju', 'Sumber', 'Periode', 'Sel', 'Karyawan', 'Status', 'Aksi'];
+  let html = '<table><thead><tr>' + cols.map(c => `<th>${c}</th>`).join('') + '</tr></thead><tbody>';
+  if (!PJ_LIST_DATA.length) {
+    html += `<tr><td colspan="${cols.length}" class="muted" style="padding:20px;text-align:center;">Tidak ada pengajuan untuk filter ini.</td></tr>`;
+  }
+  PJ_LIST_DATA.forEach(p => {
+    const pending = p.status === 'Pending';
+    const proses = !pending && p.diprosesOleh
+      ? `<br><span class="muted">oleh ${escapeHtml(p.diprosesOleh)}${p.diprosesPada ? ' · ' + new Date(p.diprosesPada).toLocaleString('id-ID') : ''}${p.catatan ? '<br>Catatan: ' + escapeHtml(p.catatan) : ''}</span>` : '';
+    const aksi = `<button class="btn btn-ghost" data-pj="detail" data-id="${escapeHtml(p.id)}">🔍 Lihat</button>` +
+      (pending && isHod_() ? ` <button class="btn btn-add" data-pj="approve" data-id="${escapeHtml(p.id)}">✔ Approve</button> <button class="btn btn-danger" data-pj="reject" data-id="${escapeHtml(p.id)}">✘ Reject</button>` : '') +
+      (pending && !isHod_() ? ` <button class="btn btn-ghost" data-pj="batal" data-id="${escapeHtml(p.id)}">Batalkan</button>` : '');
+    html += `<tr>
+      <td>${p.diajukanPada ? new Date(p.diajukanPada).toLocaleString('id-ID') : '-'}</td>
+      <td>${escapeHtml(p.pengaju)}</td>
+      <td>${escapeHtml(p.sumber)}</td>
+      <td>${escapeHtml(p.periode)}</td>
+      <td>${p.jumlahSel}</td>
+      <td>${p.jumlahKaryawan}</td>
+      <td>${pengajuanStatusBadge_(p.status)}${proses}</td>
+      <td style="white-space:nowrap;">${aksi}</td>
+    </tr>`;
+  });
+  wrap.innerHTML = html + '</tbody></table>';
+}
+
+document.addEventListener('click', function (e) {
+  const btn = e.target.closest && e.target.closest('button[data-pj]');
+  if (!btn) return;
+  const id = btn.dataset.id;
+  if (btn.dataset.pj === 'detail') openPjDetail_(id);
+  else if (btn.dataset.pj === 'approve') approvePj_(id);
+  else if (btn.dataset.pj === 'reject') rejectPj_(id);
+  else if (btn.dataset.pj === 'batal') batalPj_(id);
+});
+
+function openPjDetail_(id) {
+  const body = document.getElementById('pjDetailBody');
+  const picker = document.getElementById('pjDetailPicker');
+  pjDetailId_ = id;
+  body.innerHTML = '<p class="muted">⏳ Memuat rincian...</p>';
+  picker.classList.remove('hidden');
+  const approveBtn = document.getElementById('pjDetailApprove');
+  const rejectBtn = document.getElementById('pjDetailReject');
+  approveBtn.classList.add('hidden'); rejectBtn.classList.add('hidden');
+  approveBtn.onclick = () => { closePjDetail_(); approvePj_(id); };
+  rejectBtn.onclick = () => { closePjDetail_(); rejectPj_(id); };
+  document.getElementById('pjDetailClose').onclick = closePjDetail_;
+
+  google.script.run
+    .withSuccessHandler(json => {
+      let d; try { d = JSON.parse(json); } catch (e) { body.innerHTML = '<p style="color:#dc2626;">Data tidak valid.</p>'; return; }
+      const h = d.header || {};
+      document.getElementById('pjDetailTitle').textContent = 'Rincian — ' + (h.sumber || '') + ' (' + (h.jumlahSel || 0) + ' sel)';
+      if (h.status === 'Pending' && isHod_()) { approveBtn.classList.remove('hidden'); rejectBtn.classList.remove('hidden'); }
+      let html = `<p class="muted">Pengaju: <strong>${escapeHtml(h.pengaju)}</strong> · Periode: ${escapeHtml(h.periode)} · Status: ${escapeHtml(h.status)}${h.ringkasan ? '<br>' + escapeHtml(h.ringkasan) : ''}</p>`;
+      html += '<table><thead><tr><th>Karyawan</th><th>Perubahan (tanggal: lama → baru)</th></tr></thead><tbody>';
+      (d.perKaryawan || []).forEach(k => {
+        const items = k.perubahan.map(c => {
+          const berubah = h.status === 'Pending' && c.sekarang !== null && c.sekarang !== c.lama;
+          return `<span style="display:inline-block;margin:2px 6px 2px 0;padding:2px 8px;border-radius:6px;background:${berubah ? '#fef3c7' : '#eef2ff'};white-space:nowrap;" title="${berubah ? 'Nilai sekarang di Jadwal: ' + escapeHtml(c.sekarang || 'kosong') + ' (berubah sejak diajukan)' : ''}">${c.hari}: ${escapeHtml(c.lama || 'kosong')} → <strong>${escapeHtml(c.baru || 'kosong')}</strong>${berubah ? ' ⚠' : ''}</span>`;
+        }).join('');
+        html += `<tr><td class="name-col">${escapeHtml(k.nama)}</td><td>${items}</td></tr>`;
+      });
+      body.innerHTML = html + '</tbody></table><p class="muted">⚠ kuning = nilai di Jadwal sudah berbeda dari saat diajukan; bila disetujui, nilai baru tetap menimpa.</p>';
+    })
+    .withFailureHandler(err => { body.innerHTML = '<p style="color:#dc2626;">⚠ ' + escapeHtml(err.message) + '</p>'; })
+    .getPersetujuanJadwalDetail(id, SESSION.token);
+}
+
+function closePjDetail_() {
+  document.getElementById('pjDetailPicker').classList.add('hidden');
+  pjDetailId_ = null;
+}
+
+function approvePj_(id) {
+  if (!isHod_()) return;
+  if (!confirm('Setujui perubahan Jadwal ini? Jadwal akan langsung diperbarui.')) return;
+  google.script.run
+    .withSuccessHandler(data => {
+      applyStateAndRerender_(data);
+      const h = data.persetujuanHasil || {};
+      toast('Disetujui: ' + (h.diterapkan || 0) + ' sel diterapkan' + (h.dilewati ? ', ' + h.dilewati + ' dilewati (karyawan/kode sudah tidak ada)' : '') + '.');
+      loadPersetujuanJadwal_();
+    })
+    .withFailureHandler(err => { toast('Gagal menyetujui: ' + err.message, true); if (isAuthError_(err.message)) doLogout(); })
+    .approvePersetujuanJadwal(id, SESSION.token);
+}
+
+function rejectPj_(id) {
+  if (!isHod_()) return;
+  const catatan = prompt('Alasan penolakan (opsional):');
+  if (catatan === null) return;
+  google.script.run
+    .withSuccessHandler(() => { toast('Pengajuan ditolak. Jadwal tidak berubah.'); loadPersetujuanJadwal_(); })
+    .withFailureHandler(err => toast('Gagal menolak: ' + err.message, true))
+    .rejectPersetujuanJadwal(id, catatan, SESSION.token);
+}
+
+function batalPj_(id) {
+  if (!confirm('Batalkan pengajuan ini?')) return;
+  google.script.run
+    .withSuccessHandler(() => { toast('Pengajuan dibatalkan.'); loadPersetujuanJadwal_(); })
+    .withFailureHandler(err => toast('Gagal membatalkan: ' + err.message, true))
+    .batalkanPersetujuanJadwal(id, SESSION.token);
+}
+
 /* ============ PENGAJUAN IZIN (Notifikasi + Approve/Reject) — REBUILD v2 (fix onclick) ============ */
 
 let PENGAJUAN_LIST_DATA = [];
@@ -4031,8 +4206,9 @@ let pengajuanWrapListenerAttached_ = false;
 
 function startPengajuanBadgePolling_() {
   loadPengajuanBadgeCount_();
+  loadPersetujuanJadwalBadge_();
   if (pengajuanBadgePollTimer) clearInterval(pengajuanBadgePollTimer);
-  pengajuanBadgePollTimer = setInterval(loadPengajuanBadgeCount_, 60000);
+  pengajuanBadgePollTimer = setInterval(() => { loadPengajuanBadgeCount_(); loadPersetujuanJadwalBadge_(); }, 60000);
 }
 
 function canManageEmployee_() {
