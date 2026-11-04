@@ -57,23 +57,76 @@ function rebuildRecapRowsInExport_(sheet) {
   const from = lastEmp + 1;
   const numRows = Math.min(30, sheet.getMaxRows() - from + 1);
   if (numRows <= 0) return;
-  const labels = sheet.getRange(from, 1, numRows, 1).getValues();
+  const labels = sheet.getRange(from, 1, numRows, 2).getValues(); // kolom A (label) + B (legenda punya isi di B)
   const colLetter = c => sheet.getRange(1, c).getA1Notation().replace(/\d+/g, '');
-  labels.forEach((l, i) => {
-    const key = String(l[0] || '').trim().toLowerCase();
-    if (!crit[key]) return;
+  const first = colLetter(CONFIG.FIRST_DAY_COL), last = colLetter(CONFIG.FIRST_DAY_COL + dayCount - 1);
+  let firstRecap = 0, lastRecap = 0;
+
+  for (let i = 0; i < labels.length; i++) {
+    const key = String(labels[i][0] || '').trim().toLowerCase();
+    if (key === 'legenda:' || key === 'legenda') break; // legenda di bawahnya bukan baris rekap
     const row = from + i;
+
+    if (key === 'jumlah man power') {
+      if (!firstRecap) continue;
+      const fm = [];
+      for (let d = 0; d < dayCount; d++) {
+        const L = colLetter(CONFIG.FIRST_DAY_COL + d);
+        fm.push('=SUM(' + L + firstRecap + ':' + L + lastRecap + ')');
+      }
+      sheet.getRange(row, CONFIG.FIRST_DAY_COL, 1, dayCount).setFormulas([fm]);
+      const tc = sheet.getRange(row, CONFIG.FIRST_DAY_COL + dayCount);
+      if (typeof tc.getValue() === 'number') tc.setFormula('=SUM(' + first + row + ':' + last + row + ')');
+      continue;
+    }
+    if (!crit[key] || String(labels[i][1] || '').trim() !== '') continue;
+
     const formulas = [];
     for (let d = 0; d < dayCount; d++) {
       const L = colLetter(CONFIG.FIRST_DAY_COL + d);
       const rng = L + CONFIG.DATA_START_ROW + ':' + L + lastEmp;
-      formulas.push(crit[key].map(k => 'COUNTIF(' + rng + ',"' + k + '")').join('+'));
+      formulas.push('=' + crit[key].map(k => 'COUNTIF(' + rng + ',"' + k + '")').join('+'));
     }
-    sheet.getRange(row, CONFIG.FIRST_DAY_COL, 1, dayCount).setFormulas([formulas.map(f => '=' + f)]);
-    const first = colLetter(CONFIG.FIRST_DAY_COL), last = colLetter(CONFIG.FIRST_DAY_COL + dayCount - 1);
+    sheet.getRange(row, CONFIG.FIRST_DAY_COL, 1, dayCount).setFormulas([formulas]);
     const totalCell = sheet.getRange(row, CONFIG.FIRST_DAY_COL + dayCount);
     if (typeof totalCell.getValue() === 'number') totalCell.setFormula('=SUM(' + first + row + ':' + last + row + ')');
-  });
+    if (!firstRecap) firstRecap = row;
+    lastRecap = row;
+  }
+}
+
+/**
+ * Kolom "Hari Kerja" (kolom tepat di kanan kolom hari) pada arsip berupa nilai beku, dan kosong untuk
+ * karyawan yang ditambah belakangan. Tulis ulang sebagai rumus A1 biasa untuk SEMUA baris karyawan pada
+ * salinan ekspor: kode "1" = 1 hari kerja, kode "2" (lembur) = 2 hari. Hanya untuk Realisasi
+ * dan hanya bila kolomnya memang berjudul "Hari Kerja".
+ */
+function restoreRowFormulasInExport_(copied, sheetName) {
+  try {
+    if (sheetName !== 'Realisasi') return;
+    const dayCount = getDayColCount_(copied);
+    if (dayCount <= 0) return;
+    const col = CONFIG.FIRST_DAY_COL + dayCount;
+    if (copied.getLastColumn() < col) return;
+    const head = String(copied.getRange(CONFIG.HEADER_ROW, col).getValue() || '').trim().toLowerCase();
+    if (head !== 'hari kerja') return;
+
+    const last = getLastEmployeeRow_(copied);
+    const numRows = last - CONFIG.DATA_START_ROW + 1;
+    if (numRows <= 0) return;
+    const names = copied.getRange(CONFIG.DATA_START_ROW, 2, numRows, 1).getValues();
+    const letter = c => copied.getRange(1, c).getA1Notation().replace(/\d+/g, '');
+    const first = letter(CONFIG.FIRST_DAY_COL), lastL = letter(CONFIG.FIRST_DAY_COL + dayCount - 1);
+
+    names.forEach((n, i) => {
+      if (n[0] === '' || n[0] === null) return;
+      const r = CONFIG.DATA_START_ROW + i;
+      const rng = first + r + ':' + lastL + r;
+      copied.getRange(r, col).setFormula('=COUNTIF(' + rng + ',"1")+COUNTIF(' + rng + ',"2")*2');
+    });
+  } catch (e) {
+    Logger.log('restoreRowFormulasInExport_: ' + e.message);
+  }
 }
 
 function deptSuffixOf_(department) {
@@ -126,6 +179,7 @@ function exportSheetExcel(sheetName, token, department, periodKey) {
           keepOnlyDepartmentRows_(copied, dArc);
           if (sheetName === 'Realisasi') rebuildRecapRowsInExport_(copied);
         }
+        restoreRowFormulasInExport_(copied, sheetName);
       },
       (copied, fileId) => xlsxDownloadResult_(
         sheetName + '_ARSIP_' + arc.period.replace(/[^\w]+/g, '') + deptSuffixOf_(department) + '_' + dateStr + '.xlsx',
