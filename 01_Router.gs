@@ -99,8 +99,9 @@ const ROUTES = {
 
   /* ---- LAPORAN & EXPORT ---- */
   generateAttendanceLogExcel: { fn: 'generateAttendanceLogExcel', args: ['periodKey', 'employeeName', 'dayStart', 'dayEnd', 'token'] },
-  exportPdf: { fn: 'exportSheetPdf', args: ['sheetName', 'token', 'department'] },
-  exportSheetPdf: { fn: 'exportSheetPdf', args: ['sheetName', 'token', 'department'] },
+  exportPdf: { fn: 'exportSheetPdf', args: ['sheetName', 'token', 'department', 'periodKey'] },
+  exportSheetPdf: { fn: 'exportSheetPdf', args: ['sheetName', 'token', 'department', 'periodKey'] },
+  exportSheetExcel: { fn: 'exportSheetExcel', args: ['sheetName', 'token', 'department', 'periodKey'] },
   generateReportExcel: { fn: 'generateReportExcel', args: ['reportType', 'title', 'columns', 'rows', 'token'] },
   generateReportPdf: { fn: 'generateReportPdf', args: ['reportType', 'title', 'columns', 'rows', 'token'] },
   confirmSendEmailReport: { fn: 'confirmSendEmailReport', args: ['tglMulai', 'tglAkhir', 'tujuanEmail', 'token'] },

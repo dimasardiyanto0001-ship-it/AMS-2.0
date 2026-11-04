@@ -73,8 +73,9 @@
   assignPolaKaryawan: ['nama', 'polaAssigned', 'offsetHari', 'token'],
   generateJadwalDariPola: ['mode', 'token'],
   generateAttendanceLogExcel: ['periodKey', 'employeeName', 'dayStart', 'dayEnd', 'token'],
-  exportPdf: ['sheetName', 'token', 'department'],
-  exportSheetPdf: ['sheetName', 'token', 'department'],
+  exportPdf: ['sheetName', 'token', 'department', 'periodKey'],
+  exportSheetPdf: ['sheetName', 'token', 'department', 'periodKey'],
+  exportSheetExcel: ['sheetName', 'token', 'department', 'periodKey'],
   generateReportExcel: ['reportType', 'title', 'columns', 'rows', 'token'],
   generateReportPdf: ['reportType', 'title', 'columns', 'rows', 'token'],
   confirmSendEmailReport: ['tglMulai', 'tglAkhir', 'tujuanEmail', 'token'],
@@ -2784,7 +2785,8 @@ function submitDeleteEmployee() {
     // Dashboard & Rekap berisi rumus TOTAL gabungan lintas department -> tidak
     // dikirim department (backend akan minta pakai menu Report kalau tetap dipaksa filter).
     const isAggregateSheet = (sheetName === 'Dashboard' || sheetName === 'Rekap');
-    const deptToSend = isAggregateSheet ? 'ALL' : currentDeptFilter;
+    const viewingArchive = currentViewPeriodKey !== 'active';
+    const deptToSend = (isAggregateSheet || viewingArchive) ? 'ALL' : currentDeptFilter;
 
     google.script.run
       .withSuccessHandler(result => {
@@ -2798,7 +2800,30 @@ function submitDeleteEmployee() {
         btn.textContent = originalText;
         toast('Gagal membuat PDF: ' + err.message, true);
       })
-      .exportSheetPdf(sheetName, SESSION ? SESSION.token : null, deptToSend);
+      .exportSheetPdf(sheetName, SESSION ? SESSION.token : null, deptToSend, currentViewPeriodKey);
+  }
+
+  /** Download Excel Jadwal/Realisasi — periode aktif maupun arsip (arsip: semua department). */
+  function downloadSheetExcel(sheetName) {
+    const btn = event.target;
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ Membuat Excel...';
+    const viewingArchive = currentViewPeriodKey !== 'active';
+
+    google.script.run
+      .withSuccessHandler(result => {
+        btn.disabled = false;
+        btn.textContent = originalText;
+        triggerBase64Download(result.base64, result.filename, result.mimeType);
+        toast('Excel berhasil dibuat: ' + result.filename);
+      })
+      .withFailureHandler(err => {
+        btn.disabled = false;
+        btn.textContent = originalText;
+        toast('Gagal membuat Excel: ' + err.message, true);
+      })
+      .exportSheetExcel(sheetName, SESSION ? SESSION.token : null, viewingArchive ? 'ALL' : currentDeptFilter, currentViewPeriodKey);
   }
 
   function triggerBase64Download(base64, filename, mimeType) {
