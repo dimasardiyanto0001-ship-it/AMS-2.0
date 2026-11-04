@@ -42,13 +42,31 @@ function getArchiveSheetNameForExport_(sheetName, periodKey) {
 }
 
 /**
+ * Jumlah kolom hari SEBELUM kolom total ("Hari Kerja"). Sheet selalu menyediakan 31 kolom hari
+ * (kolom ke-31 kosong pada bulan 30 hari), jadi kolom total tidak tepat di kanan hari terakhir bulan itu.
+ * Dicari dari judul "Hari Kerja" di baris header; bila tidak ketemu, pakai jumlah hari berisi angka.
+ */
+function getRecapDayCols_(sheet) {
+  try {
+    const lastCol = sheet.getLastColumn();
+    if (lastCol >= CONFIG.FIRST_DAY_COL) {
+      const heads = sheet.getRange(CONFIG.HEADER_ROW, CONFIG.FIRST_DAY_COL, 1, lastCol - CONFIG.FIRST_DAY_COL + 1).getValues()[0];
+      for (let i = 0; i < heads.length; i++) {
+        if (typeof heads[i] === 'string' && heads[i].trim().toLowerCase() === 'hari kerja') return i;
+      }
+    }
+  } catch (e) { Logger.log('getRecapDayCols_: ' + e.message); }
+  return getDayColCount_(sheet);
+}
+
+/**
  * Arsip = nilai beku (rumus sudah dibekukan) sehingga baris rekap harian di bawah tabel (Hadir/Off/Izin/...)
  * masih berisi total SEMUA karyawan walau baris sudah disaring per department. Tulis ulang sebagai rumus
  * COUNTIF atas baris yang tersisa supaya angkanya sesuai dan otomatis mengikuti bila baris ditambah.
  */
 function rebuildRecapRowsInExport_(sheet) {
   const lastEmp = getLastEmployeeRow_(sheet);
-  const dayCount = getDayColCount_(sheet);
+  const dayCount = getRecapDayCols_(sheet);
   if (lastEmp < CONFIG.DATA_START_ROW || dayCount <= 0) return;
   const crit = {
     'hadir': ['1', '2'], 'lembur': ['2'], 'off': ['OFF'], 'off (libur)': ['OFF'], 'libur': ['OFF'],
@@ -104,7 +122,7 @@ function rebuildRecapRowsInExport_(sheet) {
 function restoreRowFormulasInExport_(copied, sheetName) {
   try {
     if (sheetName !== 'Realisasi' && sheetName !== 'Jadwal') return;
-    const dayCount = getDayColCount_(copied);
+    const dayCount = getRecapDayCols_(copied);
     if (dayCount <= 0) return;
     const col = CONFIG.FIRST_DAY_COL + dayCount;
     if (copied.getLastColumn() < col) return;
@@ -140,7 +158,7 @@ function restoreRowFormulasInExport_(copied, sheetName) {
 function rebuildJadwalRecapInExport_(sheet) {
   try {
     const lastEmp = getLastEmployeeRow_(sheet);
-    const dayCount = getDayColCount_(sheet);
+    const dayCount = getRecapDayCols_(sheet);
     if (lastEmp < CONFIG.DATA_START_ROW || dayCount <= 0) return;
     const shifts = getShiftCodesDynamic_();
     const codesFor = word => Object.keys(shifts).filter(k => k !== 'OFF' &&
