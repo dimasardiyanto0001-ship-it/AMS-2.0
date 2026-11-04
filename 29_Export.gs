@@ -103,7 +103,7 @@ function rebuildRecapRowsInExport_(sheet) {
  */
 function restoreRowFormulasInExport_(copied, sheetName) {
   try {
-    if (sheetName !== 'Realisasi') return;
+    if (sheetName !== 'Realisasi' && sheetName !== 'Jadwal') return;
     const dayCount = getDayColCount_(copied);
     if (dayCount <= 0) return;
     const col = CONFIG.FIRST_DAY_COL + dayCount;
@@ -122,10 +122,65 @@ function restoreRowFormulasInExport_(copied, sheetName) {
       if (n[0] === '' || n[0] === null) return;
       const r = CONFIG.DATA_START_ROW + i;
       const rng = first + r + ':' + lastL + r;
-      copied.getRange(r, col).setFormula('=COUNTIF(' + rng + ',"1")+COUNTIF(' + rng + ',"2")*2');
+      copied.getRange(r, col).setFormula(sheetName === 'Jadwal'
+        ? '=COUNTA(' + rng + ')-COUNTIF(' + rng + ',"OFF")' // Jadwal: hari berjadwal = sel terisi selain OFF
+        : '=COUNTIF(' + rng + ',"1")+COUNTIF(' + rng + ',"2")*2');
     });
   } catch (e) {
     Logger.log('restoreRowFormulasInExport_: ' + e.message);
+  }
+}
+
+/**
+ * Rekap harian sheet Jadwal arsip (Shift Pagi/Siang/Malam/Midle, Jumlah Libur, Total Jadwal) juga beku
+ * (total semua karyawan). Tulis ulang sebagai rumus COUNTIF atas baris karyawan yang tersisa.
+ * Kode shift untuk tiap baris diambil dari Setting Jam Kerja: label shift yang diawali kata baris itu
+ * (mis. "Siang" -> S dan S1). Total Jadwal = jumlah baris shift (tanpa OFF), sama seperti aslinya.
+ */
+function rebuildJadwalRecapInExport_(sheet) {
+  try {
+    const lastEmp = getLastEmployeeRow_(sheet);
+    const dayCount = getDayColCount_(sheet);
+    if (lastEmp < CONFIG.DATA_START_ROW || dayCount <= 0) return;
+    const shifts = getShiftCodesDynamic_();
+    const codesFor = word => Object.keys(shifts).filter(k => k !== 'OFF' &&
+      String(shifts[k].label || '').trim().toLowerCase().indexOf(word) === 0);
+
+    const from = lastEmp + 1;
+    const numRows = Math.min(30, sheet.getMaxRows() - from + 1);
+    if (numRows <= 0) return;
+    const labels = sheet.getRange(from, 1, numRows, 2).getValues();
+    const letter = c => sheet.getRange(1, c).getA1Notation().replace(/\d+/g, '');
+    const first = letter(CONFIG.FIRST_DAY_COL), lastL = letter(CONFIG.FIRST_DAY_COL + dayCount - 1);
+    const shiftRows = [];
+
+    const write = (row, makeFormula) => {
+      const fm = [];
+      for (let d = 0; d < dayCount; d++) fm.push(makeFormula(letter(CONFIG.FIRST_DAY_COL + d)));
+      sheet.getRange(row, CONFIG.FIRST_DAY_COL, 1, dayCount).setFormulas([fm]);
+      const tc = sheet.getRange(row, CONFIG.FIRST_DAY_COL + dayCount);
+      if (typeof tc.getValue() === 'number') tc.setFormula('=SUM(' + first + row + ':' + lastL + row + ')');
+    };
+
+    for (let i = 0; i < labels.length; i++) {
+      const key = String(labels[i][0] || '').trim().toLowerCase();
+      if (key === 'legenda:' || key === 'legenda') break;
+      if (String(labels[i][1] || '').trim() !== '') continue;
+      const row = from + i;
+
+      if (key.indexOf('shift ') === 0) {
+        const codes = codesFor(key.slice(6).trim());
+        if (!codes.length) continue; // tidak ada kode shift yang cocok: biarkan apa adanya
+        write(row, L => '=' + codes.map(k => 'COUNTIF(' + L + CONFIG.DATA_START_ROW + ':' + L + lastEmp + ',"' + k + '")').join('+'));
+        shiftRows.push(row);
+      } else if (key.indexOf('jumlah libur') === 0) {
+        write(row, L => '=COUNTIF(' + L + CONFIG.DATA_START_ROW + ':' + L + lastEmp + ',"OFF")');
+      } else if (key === 'total jadwal' && shiftRows.length) {
+        write(row, L => '=' + shiftRows.map(r => L + r).join('+'));
+      }
+    }
+  } catch (e) {
+    Logger.log('rebuildJadwalRecapInExport_: ' + e.message);
   }
 }
 
@@ -179,6 +234,7 @@ function exportSheetExcel(sheetName, token, department, periodKey) {
           keepOnlyDepartmentRows_(copied, dArc);
           if (sheetName === 'Realisasi') rebuildRecapRowsInExport_(copied);
         }
+        if (sheetName === 'Jadwal') rebuildJadwalRecapInExport_(copied);
         restoreRowFormulasInExport_(copied, sheetName);
       },
       (copied, fileId) => xlsxDownloadResult_(
