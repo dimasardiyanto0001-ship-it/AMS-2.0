@@ -96,48 +96,34 @@ function rebuildRecapRowsInExport_(sheet) {
 }
 
 /**
- * Kolom di kanan kolom hari (mis. "Hari Kerja") pada arsip berisi nilai beku (dan kosong untuk
- * karyawan yang ditambah belakangan). Ambil rumus dari baris karyawan di sheet AKTIF (format R1C1,
- * jadi relatif terhadap barisnya) lalu tulis ke SEMUA baris karyawan pada salinan ekspor,
- * sehingga Excel menghitung sendiri dan ikut bila baris ditambah. Dilewati bila jumlah hari beda.
+ * Kolom "Hari Kerja" (kolom tepat di kanan kolom hari) pada arsip berupa nilai beku, dan kosong untuk
+ * karyawan yang ditambah belakangan. Tulis ulang sebagai rumus A1 biasa untuk SEMUA baris karyawan pada
+ * salinan ekspor: kode "1" = 1 hari kerja, kode "2" (lembur) = 2 hari. Hanya untuk Realisasi
+ * dan hanya bila kolomnya memang berjudul "Hari Kerja".
  */
 function restoreRowFormulasInExport_(copied, sheetName) {
   try {
-    const live = getSheet_(sheetName);
+    if (sheetName !== 'Realisasi') return;
     const dayCount = getDayColCount_(copied);
     if (dayCount <= 0) return;
-    const extraStart = CONFIG.FIRST_DAY_COL + dayCount;
-    const nExtra = Math.min(live.getLastColumn(), copied.getLastColumn(), extraStart) - extraStart + 1; // hanya kolom pertama (Hari Kerja)
-    let tpl = null;
-
-    if (getDayColCount_(live) === dayCount) {
-      const liveLast = getLastEmployeeRow_(live);
-      if (liveLast >= CONFIG.DATA_START_ROW) {
-        const liveF = live.getRange(CONFIG.DATA_START_ROW, extraStart, liveLast - CONFIG.DATA_START_ROW + 1, 1).getFormulasR1C1();
-        tpl = liveF.find(row => row.some(x => x)) || null;
-      }
-    }
-    if (!tpl) {
-      // Jumlah hari periode arsip beda dengan periode aktif: pakai rumus baku Hari Kerja
-      // (kode 1 = 1 hari, kode 2 lembur = 2 hari) bila kolomnya memang berjudul "Hari Kerja".
-      const head = String(copied.getRange(CONFIG.HEADER_ROW, extraStart).getValue() || '').trim().toLowerCase();
-      if (sheetName !== 'Realisasi' || head !== 'hari kerja') return;
-      const rng = 'RC[-' + dayCount + ']:RC[-1]';
-      tpl = ['=COUNTIF(' + rng + ',"1")+COUNTIF(' + rng + ',"2")*2'];
-    }
-    if (nExtra <= 0) return;
+    const col = CONFIG.FIRST_DAY_COL + dayCount;
+    if (copied.getLastColumn() < col) return;
+    const head = String(copied.getRange(CONFIG.HEADER_ROW, col).getValue() || '').trim().toLowerCase();
+    if (head !== 'hari kerja') return;
 
     const last = getLastEmployeeRow_(copied);
     const numRows = last - CONFIG.DATA_START_ROW + 1;
     if (numRows <= 0) return;
     const names = copied.getRange(CONFIG.DATA_START_ROW, 2, numRows, 1).getValues();
-    const block = copied.getRange(CONFIG.DATA_START_ROW, extraStart, numRows, nExtra);
-    const cur = block.getFormulasR1C1();
-    const out = cur.map((row, i) => (names[i][0] !== '' && names[i][0] !== null) ? tpl.slice() : row);
-    // Sel yang di template bukan rumus dibiarkan apa adanya (nilai beku / kosong tetap).
-    const vals = block.getValues();
-    const finalOut = out.map((row, i) => row.map((f, j) => (f ? f : (vals[i][j] === '' ? '' : vals[i][j]))));
-    block.setFormulasR1C1(finalOut.map(r => r.map(x => (typeof x === 'number' ? String(x) : x))));
+    const letter = c => copied.getRange(1, c).getA1Notation().replace(/\d+/g, '');
+    const first = letter(CONFIG.FIRST_DAY_COL), lastL = letter(CONFIG.FIRST_DAY_COL + dayCount - 1);
+
+    names.forEach((n, i) => {
+      if (n[0] === '' || n[0] === null) return;
+      const r = CONFIG.DATA_START_ROW + i;
+      const rng = first + r + ':' + lastL + r;
+      copied.getRange(r, col).setFormula('=COUNTIF(' + rng + ',"1")+COUNTIF(' + rng + ',"2")*2');
+    });
   } catch (e) {
     Logger.log('restoreRowFormulasInExport_: ' + e.message);
   }
