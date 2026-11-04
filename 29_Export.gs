@@ -175,8 +175,9 @@ function rebuildJadwalRecapInExport_(sheet) {
         shiftRows.push(row);
       } else if (key.indexOf('jumlah libur') === 0) {
         write(row, L => '=COUNTIF(' + L + CONFIG.DATA_START_ROW + ':' + L + lastEmp + ',"OFF")');
-      } else if (key === 'total jadwal' && shiftRows.length) {
-        write(row, L => '=' + shiftRows.map(r => L + r).join('+'));
+      } else if (key === 'total jadwal') {
+        // semua sel terisi selain OFF (termasuk kode shift yang tidak punya baris sendiri, mis. WD)
+        write(row, L => '=COUNTA(' + L + CONFIG.DATA_START_ROW + ':' + L + lastEmp + ')-COUNTIF(' + L + CONFIG.DATA_START_ROW + ':' + L + lastEmp + ',"OFF")');
       }
     }
   } catch (e) {
@@ -304,6 +305,10 @@ function applyLegendColorRulesInExport_(sheet) {
     });
 
     grid.setBackground(null);
+    // kolom hari yang tidak terpakai bulan ini (mis. kolom ke-31 pada bulan 30 hari) juga dibersihkan dari warna lama
+    if (dayCount < 31 && sheet.getMaxColumns() >= CONFIG.FIRST_DAY_COL + 30) {
+      sheet.getRange(CONFIG.DATA_START_ROW, CONFIG.FIRST_DAY_COL + dayCount, lastEmp - CONFIG.DATA_START_ROW + 1, 31 - dayCount).setBackground(null);
+    }
     const rules = colors.map(c => SpreadsheetApp.newConditionalFormatRule()
       .whenFormulaSatisfied('=UPPER(TRIM(' + tl + '&""))="' + c.code.replace(/"/g, '') + '"')
       .setBackground(c.color)
@@ -389,6 +394,10 @@ function exportSheetExcel(sheetName, token, department, periodKey) {
   return withTempSheetCopy_(getSheet_(sheetName), 'TempXLSX_', sheetName,
     copied => {
       if (isFiltered) keepOnlyDepartmentRows_(copied, deptFilter);
+      if (sheetName === 'Jadwal') { // rekap & Hari Kerja menghitung SEMUA kode shift (S1, MD1, WD, ...)
+        rebuildJadwalRecapInExport_(copied);
+        restoreRowFormulasInExport_(copied, 'Jadwal');
+      }
       colorDayHeaders_(copied);
       applyLegendColorRulesInExport_(copied);
     },

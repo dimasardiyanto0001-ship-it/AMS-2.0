@@ -21,6 +21,7 @@
  *     perbaikiRumusRekapitulasi()         perbaiki yang di atas di Jadwal & Realisasi periode aktif
  *     perbaikiWarnaHeaderTanggal()        warnai ulang header tanggal (merah = Minggu/libur nasional) di sheet periode aktif
  *     perbaikiWarnaSelLegenda()           warna sel Jadwal & Realisasi periode aktif mengikuti legenda (format bersyarat)
+ *     perbaikiRumusJadwalSemuaShift()     Hari Kerja & rekap harian sheet Jadwal aktif menghitung semua kode shift (S1, MD1, WD, ...)
  *************************************************************/
 
 /* ============================ HELPER ============================ */
@@ -477,4 +478,14 @@ function perbaikiWarnaSelLegenda() {
   });
   SpreadsheetApp.flush();
   showAlertQuietly_('Warna sel mengikuti legenda di: ' + done.join(', '));
+}
+
+
+/** Hari Kerja dan rekap harian sheet Jadwal periode aktif: ikut semua kode shift, bukan hanya P/S/MD/M. */
+function perbaikiRumusJadwalSemuaShift() {
+  const sh = getSheet_(CONFIG.SHEET_JADWAL);
+  restoreRowFormulasInExport_(sh, 'Jadwal');
+  rebuildJadwalRecapInExport_(sh);
+  SpreadsheetApp.flush();
+  showAlertQuietly_('Rumus Hari Kerja dan rekap harian Jadwal sekarang menghitung semua kode shift.');
 }
