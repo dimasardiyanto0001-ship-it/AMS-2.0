@@ -41,15 +41,21 @@ function getArchiveSheetNameForExport_(sheetName, periodKey) {
   return { name: name, period: String(found.row[0] || '') };
 }
 
+function deptSuffixOf_(department) {
+  const d = String(department || '').trim();
+  return (d && d !== 'ALL') ? '_' + d.replace(/[^\w]+/g, '') : '';
+}
+
 function exportSheetPdf(sheetName, token, department, periodKey) {
   requireExportAccess_(token);
   const isArchive = periodKey && periodKey !== 'active';
   const dateStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || REPORT_TIME_ZONE_, 'yyyyMMdd_HHmm');
   if (isArchive) {
     const arc = getArchiveSheetNameForExport_(sheetName, String(periodKey));
-    const blobA = exportArchivedSheetPdfBlob_(arc.name, sheetName);
+    const isAgg = (sheetName === 'Dashboard' || sheetName === 'Rekap');
+    const blobA = exportArchivedSheetPdfBlob_(arc.name, sheetName, isAgg ? 'ALL' : department);
     return {
-      filename: sheetName + '_ARSIP_' + arc.period.replace(/[^\w]+/g, '') + '_' + dateStr + '.pdf',
+      filename: sheetName + '_ARSIP_' + arc.period.replace(/[^\w]+/g, '') + deptSuffixOf_(department) + '_' + dateStr + '.pdf',
       mimeType: MIME_PDF_,
       base64: Utilities.base64Encode(blobA.getBytes())
     };
@@ -77,9 +83,11 @@ function exportSheetExcel(sheetName, token, department, periodKey) {
   if (isArchive) {
     const arc = getArchiveSheetNameForExport_(sheetName, String(periodKey));
     const src = getSpreadsheet_().getSheetByName(arc.name);
-    return withTempSheetCopy_(src, 'TempXLSX_Arsip_', sheetName, copied => copied.showSheet(),
+    const dArc = String(department || '').trim();
+    return withTempSheetCopy_(src, 'TempXLSX_Arsip_', sheetName,
+      copied => { copied.showSheet(); if (dArc && dArc !== 'ALL') keepOnlyDepartmentRows_(copied, dArc); },
       (copied, fileId) => xlsxDownloadResult_(
-        sheetName + '_ARSIP_' + arc.period.replace(/[^\w]+/g, '') + '_' + dateStr + '.xlsx',
+        sheetName + '_ARSIP_' + arc.period.replace(/[^\w]+/g, '') + deptSuffixOf_(department) + '_' + dateStr + '.xlsx',
         exportSpreadsheetAsXlsxBlob_(fileId, 'Excel arsip')));
   }
 
@@ -136,12 +144,14 @@ function exportSheetPdfBlob_(sheetName, department) {
  * PDF satu sheet ARSIP (disembunyikan) lewat salinan sementara yang ditampilkan
  * (laporan bulanan untuk periode lampau). copyName = nama sheet pada salinan.
  */
-function exportArchivedSheetPdfBlob_(archiveSheetName, copyName) {
+function exportArchivedSheetPdfBlob_(archiveSheetName, copyName, department) {
   const src = getSpreadsheet_().getSheetByName(archiveSheetName);
   if (!src) throw new Error('Sheet arsip "' + archiveSheetName + '" tidak ditemukan.');
 
+  const deptFilter = String(department || '').trim();
+  const isFiltered = deptFilter && deptFilter !== 'ALL';
   return withTempSheetCopy_(src, 'TempPDF_Arsip_', copyName,
-    copied => copied.showSheet(),
+    copied => { copied.showSheet(); if (isFiltered) keepOnlyDepartmentRows_(copied, deptFilter); },
     (copied, fileId) => fetchSheetPdfBlob_(fileId, copied.getSheetId())
   );
 }

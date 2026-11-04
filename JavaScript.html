@@ -34,7 +34,7 @@
   getMyMenuPermissions: ['token'],
   getAllData: ['token', 'department'],
   getArchivedPeriods: ['token'],
-  getArchivedData: ['periodKey', 'token'],
+  getArchivedData: ['periodKey', 'token', 'department'],
   getPeriodMeta: ['periodKey', 'token'],
   archiveCurrentPeriod: ['token'],
   mulaiPeriodeBaru: ['token'],
@@ -520,9 +520,6 @@ function populateDepartmentFilterOptions_() {
 
 function onDepartmentFilterChange() {
   currentDeptFilter = document.getElementById('departmentFilterSelector').value;
-  if (currentViewPeriodKey !== 'active') {
-    toast('Filter Department saat ini hanya berlaku untuk Periode Aktif.', true);
-  }
   loadData(true);
 }
   /* ============ LAPORAN LOG ABSENSI (EXCEL) ============ */
@@ -613,7 +610,7 @@ function onDepartmentFilterChange() {
         toast('Gagal memuat data arsip: ' + err.message, true);
         if (isAuthError_(err.message)) doLogout();
       })
-      .getArchivedData(periodKey, SESSION.token);
+      .getArchivedData(periodKey, SESSION.token, currentDeptFilter);
   }
 
   function updateArchiveModeUI_() {
@@ -625,7 +622,7 @@ function onDepartmentFilterChange() {
       deleteBtn.classList.toggle('hidden', !canDelete);
     }
     const deptSel = document.getElementById('departmentFilterSelector');
-    if (deptSel) deptSel.disabled = viewingArchive;
+    if (deptSel) deptSel.disabled = false; // filter Department berlaku juga untuk arsip
     updateInputEditability();
   }
   function triggerArchivePeriod() {
@@ -2786,7 +2783,7 @@ function submitDeleteEmployee() {
     // dikirim department (backend akan minta pakai menu Report kalau tetap dipaksa filter).
     const isAggregateSheet = (sheetName === 'Dashboard' || sheetName === 'Rekap');
     const viewingArchive = currentViewPeriodKey !== 'active';
-    const deptToSend = (isAggregateSheet || viewingArchive) ? 'ALL' : currentDeptFilter;
+    const deptToSend = isAggregateSheet ? 'ALL' : currentDeptFilter;
 
     google.script.run
       .withSuccessHandler(result => {
@@ -2823,7 +2820,7 @@ function submitDeleteEmployee() {
         btn.textContent = originalText;
         toast('Gagal membuat Excel: ' + err.message, true);
       })
-      .exportSheetExcel(sheetName, SESSION ? SESSION.token : null, viewingArchive ? 'ALL' : currentDeptFilter, currentViewPeriodKey);
+      .exportSheetExcel(sheetName, SESSION ? SESSION.token : null, currentDeptFilter, currentViewPeriodKey);
   }
 
   function triggerBase64Download(base64, filename, mimeType) {

@@ -134,7 +134,7 @@ function getArchivedPeriods(token) {
   return getArchivedPeriodsInternal_();
 }
 
-function getArchivedDataInternal_(periodKey) {
+function getArchivedDataInternal_(periodKey, department) {
   const ss = getSpreadsheet_();
   const found = findArchiveRow_(getArchiveIndexSheet_(), periodKey);
   if (!found) throw new Error('Arsip untuk periode ini tidak ditemukan.');
@@ -150,14 +150,24 @@ function getArchivedDataInternal_(periodKey) {
   const jamKerjaArchiveName = String(row[6] || '').trim();
   const jamKerjaSheetArsip = jamKerjaArchiveName ? ss.getSheetByName(jamKerjaArchiveName) : null;
 
-  const jadwal = readGridFromSheetObj_(jadwalSheet);
-  const realisasi = readGridFromSheetObj_(realisasiSheet);
+  let jadwal = readGridFromSheetObj_(jadwalSheet);
+  let realisasi = readGridFromSheetObj_(realisasiSheet);
+  // Filter Department (opsional): saring kedua grid dulu, rekap/dashboard/tren ikut terhitung dari grid yang sudah disaring.
+  const deptFilter = String(department || '').trim();
+  const isFiltered = !!deptFilter && deptFilter !== 'ALL';
+  if (isFiltered) {
+    const master = getKaryawanMasterMap_();
+    const allowed = new Set(Object.keys(master).filter(k => master[k].department === deptFilter));
+    jadwal = filterGridByNames_(jadwal, allowed);
+    realisasi = filterGridByNames_(realisasi, allowed);
+  }
   const rekapDenganJamKerja = attachJamKerjaToRekap_(computeRekapDariGrid_(jadwal, realisasi), jadwal, jamKerjaSheetArsip);
 
   return {
     period: row[0],
     periodKey: row[1],
     isArchived: true,
+    departmentFilter: isFiltered ? deptFilter : null,
     dayNames: jadwal.dayNames,
     dayCount: jadwal.dayCount,
     jadwal: jadwal.employees,
@@ -171,9 +181,9 @@ function getArchivedDataInternal_(periodKey) {
   };
 }
 
-function getArchivedData(periodKey, token) {
+function getArchivedData(periodKey, token, department) {
   verifySession_(token);
-  return getArchivedDataInternal_(periodKey);
+  return getArchivedDataInternal_(periodKey, department);
 }
 
 /** Grid Jadwal dari arsip (dipakai Log Absensi dan getPeriodMeta). */

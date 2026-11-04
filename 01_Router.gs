@@ -50,7 +50,7 @@ const ROUTES = {
   /* ---- DATA UTAMA & PERIODE ---- */
   getAllData: { fn: 'getAllData', args: ['token', 'department'] },
   getArchivedPeriods: { fn: 'getArchivedPeriods', args: ['token'] },
-  getArchivedData: { fn: 'getArchivedData', args: ['periodKey', 'token'] },
+  getArchivedData: { fn: 'getArchivedData', args: ['periodKey', 'token', 'department'] },
   getPeriodMeta: { fn: 'getPeriodMeta', args: ['periodKey', 'token'] },
   archiveCurrentPeriod: { fn: 'archiveCurrentPeriod', args: ['token'] },
   mulaiPeriodeBaru: { fn: 'mulaiPeriodeBaru', args: ['token'] },
@@ -149,7 +149,7 @@ const ROUTES = {
 const GET_ACTIONS = {
   data:            { route: 'getAllData',          params: p => ({ token: p.token, department: p.department }) },
   archivedPeriods: { route: 'getArchivedPeriods',  params: p => ({ token: p.token }) },
-  archivedData:    { route: 'getArchivedData',     params: p => ({ periodKey: requireParam_(p, 'key'), token: p.token }) },
+  archivedData:    { route: 'getArchivedData',     params: p => ({ periodKey: requireParam_(p, 'key'), token: p.token, department: p.department }) },
   periodMeta:      { route: 'getPeriodMeta',       params: p => ({ periodKey: p.key || 'active', token: p.token }) }
 };
 
