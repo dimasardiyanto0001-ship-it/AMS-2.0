@@ -184,6 +184,137 @@ function rebuildJadwalRecapInExport_(sheet) {
   }
 }
 
+/**
+ * Warna sel jadwal/realisasi pada arsip adalah isian statis (tidak ikut berubah bila isi sel berubah).
+ * Hapus warna statis di area hari, lalu pasang aturan warna otomatis (conditional formatting) per kode
+ * yang warnanya diambil dari LEGENDA di sheet itu sendiri. Kode shift yang tidak ada di legenda
+ * (mis. S1, MD1) memakai warna legenda yang labelnya diawali nama shift tersebut ("Siang 1" -> Siang).
+ */
+function applyLegendColorsInExport_(sheet) {
+  try {
+    const lastEmp = getLastEmployeeRow_(sheet);
+    const dayCount = getDayColCount_(sheet);
+    if (lastEmp < CONFIG.DATA_START_ROW || dayCount <= 0) return;
+
+    const from = lastEmp + 1;
+    const numRows = Math.min(40, sheet.getMaxRows() - from + 1);
+    if (numRows <= 0) return;
+    const block = sheet.getRange(from, 1, numRows, 2);
+    const vals = block.getValues();
+    const bgs = block.getBackgrounds();
+    let start = -1;
+    for (let i = 0; i < vals.length; i++) {
+      if (String(vals[i][0] || '').trim().toLowerCase().indexOf('legenda') === 0) { start = i + 1; break; }
+    }
+    if (start < 0) return;
+
+    const colorOf = {};   // kode -> warna
+    const labelColor = []; // [labelHurufKecil, warna]
+    const isBlankColor = c => !c || c === '#ffffff';
+    for (let i = start; i < vals.length; i++) {
+      const code = vals[i][0];
+      if (code === '' || code === null) break;
+      const color = bgs[i][0];
+      if (isBlankColor(color)) continue;
+      colorOf[String(code).trim().toUpperCase()] = { code: code, color: color };
+      const label = String(vals[i][1] || '').trim().toLowerCase();
+      if (label) labelColor.push([label, color]);
+    }
+
+    // Kode shift yang tidak ada di legenda: pinjam warna legenda yang labelnya awalan label shift.
+    try {
+      const shifts = getShiftCodesDynamic_();
+      Object.keys(shifts).forEach(k => {
+        const key = String(k).toUpperCase();
+        if (colorOf[key]) return;
+        const lab = String(shifts[k].label || '').trim().toLowerCase();
+        const hit = labelColor.find(lc => lab.indexOf(lc[0]) === 0);
+        if (hit) colorOf[key] = { code: k, color: hit[1] };
+      });
+    } catch (e) { /* Setting Jam Kerja tidak terbaca: cukup pakai legenda */ }
+
+    const area = sheet.getRange(CONFIG.DATA_START_ROW, CONFIG.FIRST_DAY_COL, lastEmp - CONFIG.DATA_START_ROW + 1, dayCount);
+    area.setBackground(null);
+
+    const rules = sheet.getConditionalFormatRules();
+    Object.keys(colorOf).forEach(key => {
+      const e = colorOf[key];
+      const variants = (typeof e.code === 'number') ? [e.code]
+        : (/^\d+$/.test(key) ? [Number(key), key] : [key, key.toLowerCase()].filter((v, i, a) => a.indexOf(v) === i));
+      variants.forEach(v => {
+        const b = SpreadsheetApp.newConditionalFormatRule().setRanges([area]);
+        const rule = (typeof v === 'number' ? b.whenNumberEqualTo(v) : b.whenTextEqualTo(v)).setBackground(e.color).build();
+        rules.push(rule);
+      });
+    });
+    sheet.setConditionalFormatRules(rules);
+  } catch (err) {
+    Logger.log('applyLegendColorsInExport_: ' + err.message);
+  }
+}
+
+/**
+ * Warna sel jadwal/realisasi pada arsip adalah warna beku (tidak mengikuti isi sel). Pada salinan ekspor:
+ * baca warna tiap kode dari LEGENDA di bawah tabel, kosongkan warna beku di sel, lalu pasang format
+ * bersyarat (kode = isi sel -> warna legenda). Warna lalu otomatis mengikuti bila kode diubah di Excel.
+ */
+function applyLegendColorRulesInExport_(sheet) {
+  try {
+    const lastEmp = getLastEmployeeRow_(sheet);
+    const dayCount = getDayColCount_(sheet);
+    if (lastEmp < CONFIG.DATA_START_ROW || dayCount <= 0) return;
+
+    const from = lastEmp + 1;
+    const numRows = Math.min(40, sheet.getMaxRows() - from + 1);
+    if (numRows <= 0) return;
+    const labels = sheet.getRange(from, 1, numRows, 1).getValues();
+    let start = -1;
+    for (let i = 0; i < labels.length; i++) {
+      if (String(labels[i][0] || '').trim().toLowerCase().indexOf('legenda') === 0) { start = i + 1; break; }
+    }
+    if (start < 0) return;
+
+    const colors = [];
+    for (let i = start; i < labels.length; i++) {
+      const code = String(labels[i][0] === null || labels[i][0] === undefined ? '' : labels[i][0]).trim();
+      if (!code) break;
+      const bg = String(sheet.getRange(from + i, 1).getBackground() || '').toLowerCase();
+      if (bg && bg !== '#ffffff') colors.push({ code: code.toUpperCase(), color: bg });
+    }
+    if (!colors.length) return;
+
+    const grid = sheet.getRange(CONFIG.DATA_START_ROW, CONFIG.FIRST_DAY_COL, lastEmp - CONFIG.DATA_START_ROW + 1, dayCount);
+    const tl = grid.getA1Notation().split(':')[0]; // sel kiri-atas, mis. D6 (relatif untuk rumus)
+
+    // Kode yang ada di data tapi tidak ada di legenda (mis. S1, MD1, WD): pakai warna yang paling sering dipakainya.
+    const known = {};
+    colors.forEach(c => { known[c.code] = true; });
+    const vals = grid.getValues(), bgs = grid.getBackgrounds();
+    const tally = {};
+    vals.forEach((row, i) => row.forEach((v, j) => {
+      const code = String(v === null || v === undefined ? '' : v).trim().toUpperCase();
+      const bg = String(bgs[i][j] || '').toLowerCase();
+      if (!code || known[code] || !bg || bg === '#ffffff') return;
+      tally[code] = tally[code] || {};
+      tally[code][bg] = (tally[code][bg] || 0) + 1;
+    }));
+    Object.keys(tally).forEach(code => {
+      const best = Object.keys(tally[code]).sort((x, y) => tally[code][y] - tally[code][x])[0];
+      colors.push({ code: code, color: best });
+    });
+
+    grid.setBackground(null);
+    const rules = colors.map(c => SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied('=UPPER(TRIM(' + tl + '&""))="' + c.code.replace(/"/g, '') + '"')
+      .setBackground(c.color)
+      .setRanges([grid])
+      .build());
+    sheet.setConditionalFormatRules(rules.concat(sheet.getConditionalFormatRules()));
+  } catch (e) {
+    Logger.log('applyLegendColorRulesInExport_: ' + e.message);
+  }
+}
+
 function deptSuffixOf_(department) {
   const d = String(department || '').trim();
   return (d && d !== 'ALL') ? '_' + d.replace(/[^\w]+/g, '') : '';
@@ -236,6 +367,8 @@ function exportSheetExcel(sheetName, token, department, periodKey) {
         }
         if (sheetName === 'Jadwal') rebuildJadwalRecapInExport_(copied);
         restoreRowFormulasInExport_(copied, sheetName);
+        applyLegendColorRulesInExport_(copied);
+        applyLegendColorsInExport_(copied);
       },
       (copied, fileId) => xlsxDownloadResult_(
         sheetName + '_ARSIP_' + arc.period.replace(/[^\w]+/g, '') + deptSuffixOf_(department) + '_' + dateStr + '.xlsx',
