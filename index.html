@@ -312,6 +312,7 @@
             <input type="file" id="jadwalFileInput" accept=".xlsx" style="display:none" onchange="handleJadwalFileSelected(event)">
             <button class="btn btn-template" id="downloadTemplateBtn" onclick="downloadJadwalTemplate()">Unduh Template</button>
             <button class="btn btn-upload" id="uploadJadwalBtn" onclick="triggerJadwalUpload()">Upload Jadwal</button>
+            <button class="btn btn-excel" onclick="downloadSheetExcel('Jadwal')">⬇ Download Excel</button>
             <button class="btn btn-pdf" onclick="downloadPdf('Jadwal')">⬇ Download PDF</button>
           </div>
         </div>
@@ -350,6 +351,7 @@
             <button class="btn btn-upload" id="uploadRealisasiBtn" onclick="triggerRealisasiUpload()">Upload Realisasi</button>
             <input type="file" id="fingerFileInput" accept=".xls,.xlsx" style="display:none" onchange="handleFingerFileSelected(event)">
             <button class="btn btn-upload" id="uploadFingerBtn" onclick="triggerFingerUpload()">Upload Finger Absen</button>
+            <button class="btn btn-excel" onclick="downloadSheetExcel('Realisasi')">⬇ Download Excel</button>
             <button class="btn btn-pdf" onclick="downloadPdf('Realisasi')">⬇ Download PDF</button>
           </div>
         </div>

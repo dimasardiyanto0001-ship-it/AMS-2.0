@@ -1,7 +1,8 @@
 /*************************************************************
  * 29_Export.gs
  * Export ke PDF/Excel:
- *   exportSheetPdf       sheet Rekap/Dashboard/Jadwal/Realisasi -> PDF
+ *   exportSheetPdf       sheet Rekap/Dashboard/Jadwal/Realisasi -> PDF (periode aktif atau arsip)
+ *   exportSheetExcel     sheet Jadwal/Realisasi -> Excel (periode aktif atau arsip)
  *                        (Jadwal/Realisasi bisa difilter per department)
  *   generateReportExcel  laporan generik (Summary/Detail/Department/Exception)
  *   generateReportPdf    -> Excel / PDF dari kolom+baris yang dikirim frontend
@@ -22,10 +23,44 @@ const REPORT_TIME_ZONE_ = 'GMT+7';
 
 /* ============================ EXPORT SHEET KE PDF ============================ */
 
-function exportSheetPdf(sheetName, token, department) {
-  requireMenuAccess_(token, 'exportsheetpdf');
-  const blob = exportSheetPdfBlob_(sheetName, department);
+/** Boleh export: Super Admin & Admin (supervisor) selalu; role lain perlu izin menu export. */
+function requireExportAccess_(token) {
+  const session = verifySession_(token);
+  if (isSuperAdminRole_(session.role) || isAdminRole_(session.role)) return session;
+  return requireMenuAccess_(token, 'exportsheetpdf');
+}
+
+/** Nama sheet arsip (Jadwal/Realisasi) untuk periodKey arsip; lempar error kalau tidak ada. */
+function getArchiveSheetNameForExport_(sheetName, periodKey) {
+  const colIdx = { Jadwal: 2, Realisasi: 3, Dashboard: 4, Rekap: 5 }[sheetName];
+  if (colIdx === undefined) throw new Error('Sheet "' + sheetName + '" tidak diizinkan untuk diexport.');
+  const found = findArchiveRow_(getArchiveIndexSheet_(), periodKey);
+  if (!found) throw new Error('Arsip untuk periode ini tidak ditemukan.');
+  const name = String(found.row[colIdx] || '').trim();
+  if (!name || !getSpreadsheet_().getSheetByName(name)) throw new Error('Sheet arsip "' + sheetName + '" tidak ditemukan (mungkin terhapus manual).');
+  return { name: name, period: String(found.row[0] || '') };
+}
+
+function deptSuffixOf_(department) {
+  const d = String(department || '').trim();
+  return (d && d !== 'ALL') ? '_' + d.replace(/[^\w]+/g, '') : '';
+}
+
+function exportSheetPdf(sheetName, token, department, periodKey) {
+  requireExportAccess_(token);
+  const isArchive = periodKey && periodKey !== 'active';
   const dateStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || REPORT_TIME_ZONE_, 'yyyyMMdd_HHmm');
+  if (isArchive) {
+    const arc = getArchiveSheetNameForExport_(sheetName, String(periodKey));
+    const isAgg = (sheetName === 'Dashboard' || sheetName === 'Rekap');
+    const blobA = exportArchivedSheetPdfBlob_(arc.name, sheetName, isAgg ? 'ALL' : department);
+    return {
+      filename: sheetName + '_ARSIP_' + arc.period.replace(/[^\w]+/g, '') + deptSuffixOf_(department) + '_' + dateStr + '.pdf',
+      mimeType: MIME_PDF_,
+      base64: Utilities.base64Encode(blobA.getBytes())
+    };
+  }
+  const blob = exportSheetPdfBlob_(sheetName, department);
   const deptSuffix = (department && department !== 'ALL') ? '_' + department.replace(/[^\w]+/g, '') : '';
 
   return {
@@ -33,6 +68,36 @@ function exportSheetPdf(sheetName, token, department) {
     mimeType: MIME_PDF_,
     base64: Utilities.base64Encode(blob.getBytes())
   };
+}
+
+/**
+ * Export sheet Jadwal / Realisasi ke Excel (.xlsx), periode aktif ATAU arsip.
+ * periodKey 'active'/kosong = periode aktif; selain itu = key arsip. Read-only.
+ */
+function exportSheetExcel(sheetName, token, department, periodKey) {
+  requireExportAccess_(token);
+  if (['Jadwal', 'Realisasi'].indexOf(sheetName) === -1) throw new Error('Export Excel hanya untuk Jadwal atau Realisasi.');
+  const dateStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || REPORT_TIME_ZONE_, 'yyyyMMdd_HHmm');
+  const isArchive = periodKey && periodKey !== 'active';
+
+  if (isArchive) {
+    const arc = getArchiveSheetNameForExport_(sheetName, String(periodKey));
+    const src = getSpreadsheet_().getSheetByName(arc.name);
+    const dArc = String(department || '').trim();
+    return withTempSheetCopy_(src, 'TempXLSX_Arsip_', sheetName,
+      copied => { copied.showSheet(); if (dArc && dArc !== 'ALL') keepOnlyDepartmentRows_(copied, dArc); },
+      (copied, fileId) => xlsxDownloadResult_(
+        sheetName + '_ARSIP_' + arc.period.replace(/[^\w]+/g, '') + deptSuffixOf_(department) + '_' + dateStr + '.xlsx',
+        exportSpreadsheetAsXlsxBlob_(fileId, 'Excel arsip')));
+  }
+
+  const deptFilter = String(department || '').trim();
+  const isFiltered = deptFilter && deptFilter !== 'ALL';
+  return withTempSheetCopy_(getSheet_(sheetName), 'TempXLSX_', sheetName,
+    copied => { if (isFiltered) keepOnlyDepartmentRows_(copied, deptFilter); },
+    (copied, fileId) => xlsxDownloadResult_(
+      sheetName + (isFiltered ? '_' + deptFilter.replace(/[^\w]+/g, '') : '') + '_' + dateStr + '.xlsx',
+      exportSpreadsheetAsXlsxBlob_(fileId, 'Excel ' + sheetName)));
 }
 
 /** Ambil PDF satu sheet (gid) dari spreadsheet fileId. @return {Blob} */
@@ -79,12 +144,14 @@ function exportSheetPdfBlob_(sheetName, department) {
  * PDF satu sheet ARSIP (disembunyikan) lewat salinan sementara yang ditampilkan
  * (laporan bulanan untuk periode lampau). copyName = nama sheet pada salinan.
  */
-function exportArchivedSheetPdfBlob_(archiveSheetName, copyName) {
+function exportArchivedSheetPdfBlob_(archiveSheetName, copyName, department) {
   const src = getSpreadsheet_().getSheetByName(archiveSheetName);
   if (!src) throw new Error('Sheet arsip "' + archiveSheetName + '" tidak ditemukan.');
 
+  const deptFilter = String(department || '').trim();
+  const isFiltered = deptFilter && deptFilter !== 'ALL';
   return withTempSheetCopy_(src, 'TempPDF_Arsip_', copyName,
-    copied => copied.showSheet(),
+    copied => { copied.showSheet(); if (isFiltered) keepOnlyDepartmentRows_(copied, deptFilter); },
     (copied, fileId) => fetchSheetPdfBlob_(fileId, copied.getSheetId())
   );
 }

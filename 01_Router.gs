@@ -50,7 +50,7 @@ const ROUTES = {
   /* ---- DATA UTAMA & PERIODE ---- */
   getAllData: { fn: 'getAllData', args: ['token', 'department'] },
   getArchivedPeriods: { fn: 'getArchivedPeriods', args: ['token'] },
-  getArchivedData: { fn: 'getArchivedData', args: ['periodKey', 'token'] },
+  getArchivedData: { fn: 'getArchivedData', args: ['periodKey', 'token', 'department'] },
   getPeriodMeta: { fn: 'getPeriodMeta', args: ['periodKey', 'token'] },
   archiveCurrentPeriod: { fn: 'archiveCurrentPeriod', args: ['token'] },
   mulaiPeriodeBaru: { fn: 'mulaiPeriodeBaru', args: ['token'] },
@@ -99,8 +99,9 @@ const ROUTES = {
 
   /* ---- LAPORAN & EXPORT ---- */
   generateAttendanceLogExcel: { fn: 'generateAttendanceLogExcel', args: ['periodKey', 'employeeName', 'dayStart', 'dayEnd', 'token'] },
-  exportPdf: { fn: 'exportSheetPdf', args: ['sheetName', 'token', 'department'] },
-  exportSheetPdf: { fn: 'exportSheetPdf', args: ['sheetName', 'token', 'department'] },
+  exportPdf: { fn: 'exportSheetPdf', args: ['sheetName', 'token', 'department', 'periodKey'] },
+  exportSheetPdf: { fn: 'exportSheetPdf', args: ['sheetName', 'token', 'department', 'periodKey'] },
+  exportSheetExcel: { fn: 'exportSheetExcel', args: ['sheetName', 'token', 'department', 'periodKey'] },
   generateReportExcel: { fn: 'generateReportExcel', args: ['reportType', 'title', 'columns', 'rows', 'token'] },
   generateReportPdf: { fn: 'generateReportPdf', args: ['reportType', 'title', 'columns', 'rows', 'token'] },
   confirmSendEmailReport: { fn: 'confirmSendEmailReport', args: ['tglMulai', 'tglAkhir', 'tujuanEmail', 'token'] },
@@ -148,7 +149,7 @@ const ROUTES = {
 const GET_ACTIONS = {
   data:            { route: 'getAllData',          params: p => ({ token: p.token, department: p.department }) },
   archivedPeriods: { route: 'getArchivedPeriods',  params: p => ({ token: p.token }) },
-  archivedData:    { route: 'getArchivedData',     params: p => ({ periodKey: requireParam_(p, 'key'), token: p.token }) },
+  archivedData:    { route: 'getArchivedData',     params: p => ({ periodKey: requireParam_(p, 'key'), token: p.token, department: p.department }) },
   periodMeta:      { route: 'getPeriodMeta',       params: p => ({ periodKey: p.key || 'active', token: p.token }) }
 };
 
