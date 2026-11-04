@@ -68,6 +68,42 @@ function buildNextPeriodLabel_(oldText, newMonthNameUpper, newYear) {
     : result + ' ' + newMonthNameUpper;
 }
 
+/* ============================ WARNA HEADER TANGGAL ============================ */
+
+const HARI_LIBUR_SHEET_ = 'HariLibur'; // opsional: kolom A = tanggal libur nasional, kolom B = keterangan
+const HEADER_COLOR_LIBUR_ = '#FF0000';
+const HEADER_COLOR_BIASA_ = '#1F3864';
+
+/** Nomor tanggal (1..31) libur nasional pada bulan periode sheet, dari sheet "HariLibur" (jika ada). */
+function getHolidayDayNumbers_(periodText) {
+  const set = {};
+  try {
+    const my = parsePeriodMonthYear_(periodText);
+    const sh = getSpreadsheet_().getSheetByName(HARI_LIBUR_SHEET_);
+    if (!my || !sh || sh.getLastRow() < 1) return set;
+    sh.getRange(1, 1, sh.getLastRow(), 1).getValues().forEach(r => {
+      const v = r[0];
+      const d = (v instanceof Date) ? v : (v ? new Date(v) : null);
+      if (d && !isNaN(d.getTime()) && d.getFullYear() === my.year && d.getMonth() === my.monthIndex) set[d.getDate()] = true;
+    });
+  } catch (e) { Logger.log('getHolidayDayNumbers_: ' + e.message); }
+  return set;
+}
+
+/**
+ * Warnai header tanggal (baris angka + baris nama hari): merah untuk Minggu dan libur nasional,
+ * selain itu biru tua. Berdasarkan nama hari di baris DAY_NAME_ROW, jadi selalu cocok dengan kalendernya.
+ */
+function colorDayHeaders_(sheet) {
+  const dayCount = getDayColCount_(sheet);
+  if (dayCount <= 0) return;
+  const holidays = getHolidayDayNumbers_(String(sheet.getRange(2, 1).getValue() || ''));
+  const names = sheet.getRange(CONFIG.DAY_NAME_ROW, CONFIG.FIRST_DAY_COL, 1, dayCount).getValues()[0];
+  const bg = names.map((n, i) => (String(n).trim().toLowerCase() === 'min' || holidays[i + 1]) ? HEADER_COLOR_LIBUR_ : HEADER_COLOR_BIASA_);
+  sheet.getRange(CONFIG.HEADER_ROW, CONFIG.FIRST_DAY_COL, 1, dayCount).setBackgrounds([bg]);
+  sheet.getRange(CONFIG.DAY_NAME_ROW, CONFIG.FIRST_DAY_COL, 1, dayCount).setBackgrounds([bg]);
+}
+
 /* ============================ RESET SHEET ============================ */
 
 /** Tulis label periode, header tanggal/hari bulan baru, dan kosongkan seluruh grid. */
@@ -85,6 +121,7 @@ function resetSheetForNewPeriod_(sheet, periodLabel, year, monthIndex, dayCount)
   }
   sheet.getRange(CONFIG.HEADER_ROW, CONFIG.FIRST_DAY_COL, 1, dayCount).setValues([headerValues]);
   sheet.getRange(CONFIG.DAY_NAME_ROW, CONFIG.FIRST_DAY_COL, 1, dayCount).setValues([dayNameValues]);
+  colorDayHeaders_(sheet); // warna merah ikut kalender bulan baru (sebelumnya warna bulan lama terbawa)
 
   const numRows = getLastEmployeeRow_(sheet) - CONFIG.DATA_START_ROW + 1;
   if (numRows > 0) {

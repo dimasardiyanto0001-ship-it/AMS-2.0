@@ -367,6 +367,7 @@ function exportSheetExcel(sheetName, token, department, periodKey) {
         }
         if (sheetName === 'Jadwal') rebuildJadwalRecapInExport_(copied);
         restoreRowFormulasInExport_(copied, sheetName);
+        colorDayHeaders_(copied); // arsip lama membawa warna header bulan sebelumnya
         applyLegendColorRulesInExport_(copied);
         applyLegendColorsInExport_(copied);
       },
@@ -378,7 +379,11 @@ function exportSheetExcel(sheetName, token, department, periodKey) {
   const deptFilter = String(department || '').trim();
   const isFiltered = deptFilter && deptFilter !== 'ALL';
   return withTempSheetCopy_(getSheet_(sheetName), 'TempXLSX_', sheetName,
-    copied => { if (isFiltered) keepOnlyDepartmentRows_(copied, deptFilter); },
+    copied => {
+      if (isFiltered) keepOnlyDepartmentRows_(copied, deptFilter);
+      colorDayHeaders_(copied);
+      applyLegendColorRulesInExport_(copied);
+    },
     (copied, fileId) => xlsxDownloadResult_(
       sheetName + (isFiltered ? '_' + deptFilter.replace(/[^\w]+/g, '') : '') + '_' + dateStr + '.xlsx',
       exportSpreadsheetAsXlsxBlob_(fileId, 'Excel ' + sheetName)));
