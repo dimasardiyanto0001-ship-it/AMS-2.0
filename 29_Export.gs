@@ -309,7 +309,15 @@ function applyLegendColorRulesInExport_(sheet) {
       .setBackground(c.color)
       .setRanges([grid])
       .build());
-    sheet.setConditionalFormatRules(rules.concat(sheet.getConditionalFormatRules()));
+    // Buang aturan buatan fungsi ini yang sudah ada (supaya tidak dobel bila dijalankan ulang di sheet langsung).
+    const keep = sheet.getConditionalFormatRules().filter(r => {
+      try {
+        const bc = r.getBooleanCondition();
+        const v = bc && bc.getCriteriaValues ? String(bc.getCriteriaValues()[0] || '') : '';
+        return v.indexOf('=UPPER(TRIM(') !== 0;
+      } catch (e) { return true; }
+    });
+    sheet.setConditionalFormatRules(rules.concat(keep));
   } catch (e) {
     Logger.log('applyLegendColorRulesInExport_: ' + e.message);
   }

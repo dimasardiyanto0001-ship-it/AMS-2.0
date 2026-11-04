@@ -20,6 +20,7 @@
  *     cekRumusRekapitulasi()              LAPORAN: baris karyawan tanpa rumus / rekap yang belum mencakup semua baris
  *     perbaikiRumusRekapitulasi()         perbaiki yang di atas di Jadwal & Realisasi periode aktif
  *     perbaikiWarnaHeaderTanggal()        warnai ulang header tanggal (merah = Minggu/libur nasional) di sheet periode aktif
+ *     perbaikiWarnaSelLegenda()           warna sel Jadwal & Realisasi periode aktif mengikuti legenda (format bersyarat)
  *************************************************************/
 
 /* ============================ HELPER ============================ */
@@ -463,4 +464,17 @@ function perbaikiWarnaHeaderTanggal() {
   });
   SpreadsheetApp.flush();
   showAlertQuietly_('Header tanggal diwarnai ulang di: ' + done.join(', ') + '\n(merah = hari Minggu + tanggal di sheet "' + HARI_LIBUR_SHEET_ + '" bila ada)');
+}
+
+
+/** Hapus warna beku sel Jadwal & Realisasi periode aktif, ganti format bersyarat sesuai legenda sheet. */
+function perbaikiWarnaSelLegenda() {
+  const done = [];
+  [CONFIG.SHEET_JADWAL, CONFIG.SHEET_REALISASI].forEach(name => {
+    const sh = getSheet_(name);
+    applyLegendColorRulesInExport_(sh);
+    done.push(name);
+  });
+  SpreadsheetApp.flush();
+  showAlertQuietly_('Warna sel mengikuti legenda di: ' + done.join(', '));
 }
