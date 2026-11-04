@@ -19,6 +19,9 @@
  *     backfillRekapBulananDariArsip()     isi Rekap_Bulanan dari semua periode arsip
  *     cekRumusRekapitulasi()              LAPORAN: baris karyawan tanpa rumus / rekap yang belum mencakup semua baris
  *     perbaikiRumusRekapitulasi()         perbaiki yang di atas di Jadwal & Realisasi periode aktif
+ *     perbaikiWarnaHeaderTanggal()        warnai ulang header tanggal (merah = Minggu/libur nasional) di sheet periode aktif
+ *     perbaikiWarnaSelLegenda()           warna sel Jadwal & Realisasi periode aktif mengikuti legenda (format bersyarat)
+ *     perbaikiRumusJadwalSemuaShift()     Hari Kerja & rekap harian sheet Jadwal aktif menghitung semua kode shift (S1, MD1, WD, ...)
  *************************************************************/
 
 /* ============================ HELPER ============================ */
@@ -447,4 +450,42 @@ function cekRumusRekapitulasi() {
 /** Perbaiki rumus Jadwal & Realisasi periode aktif; sheet arsip tidak disentuh. */
 function perbaikiRumusRekapitulasi() {
   showAlertQuietly_('PERBAIKAN RUMUS selesai (yang dilaporkan sudah diperbaiki)\n' + analisisRumusRekapitulasi_(true));
+}
+
+
+/** Warnai ulang header tanggal Jadwal, Realisasi, JamKerja, JamScan periode aktif (arsip tidak disentuh). */
+function perbaikiWarnaHeaderTanggal() {
+  const ss = getSpreadsheet_();
+  const done = [];
+  [CONFIG.SHEET_JADWAL, CONFIG.SHEET_REALISASI, CONFIG.SHEET_JAMKERJA, CONFIG.SHEET_JAMSCAN].forEach(name => {
+    const sh = ss.getSheetByName(name);
+    if (!sh) return;
+    colorDayHeaders_(sh);
+    done.push(name);
+  });
+  SpreadsheetApp.flush();
+  showAlertQuietly_('Header tanggal diwarnai ulang di: ' + done.join(', ') + '\n(merah = hari Minggu + tanggal di sheet "' + HARI_LIBUR_SHEET_ + '" bila ada)');
+}
+
+
+/** Hapus warna beku sel Jadwal & Realisasi periode aktif, ganti format bersyarat sesuai legenda sheet. */
+function perbaikiWarnaSelLegenda() {
+  const done = [];
+  [CONFIG.SHEET_JADWAL, CONFIG.SHEET_REALISASI].forEach(name => {
+    const sh = getSheet_(name);
+    applyLegendColorRulesInExport_(sh);
+    done.push(name);
+  });
+  SpreadsheetApp.flush();
+  showAlertQuietly_('Warna sel mengikuti legenda di: ' + done.join(', '));
+}
+
+
+/** Hari Kerja dan rekap harian sheet Jadwal periode aktif: ikut semua kode shift, bukan hanya P/S/MD/M. */
+function perbaikiRumusJadwalSemuaShift() {
+  const sh = getSheet_(CONFIG.SHEET_JADWAL);
+  restoreRowFormulasInExport_(sh, 'Jadwal');
+  rebuildJadwalRecapInExport_(sh);
+  SpreadsheetApp.flush();
+  showAlertQuietly_('Rumus Hari Kerja dan rekap harian Jadwal sekarang menghitung semua kode shift.');
 }

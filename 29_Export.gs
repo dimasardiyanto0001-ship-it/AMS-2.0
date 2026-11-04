@@ -42,13 +42,31 @@ function getArchiveSheetNameForExport_(sheetName, periodKey) {
 }
 
 /**
+ * Jumlah kolom hari SEBELUM kolom total ("Hari Kerja"). Sheet selalu menyediakan 31 kolom hari
+ * (kolom ke-31 kosong pada bulan 30 hari), jadi kolom total tidak tepat di kanan hari terakhir bulan itu.
+ * Dicari dari judul "Hari Kerja" di baris header; bila tidak ketemu, pakai jumlah hari berisi angka.
+ */
+function getRecapDayCols_(sheet) {
+  try {
+    const lastCol = sheet.getLastColumn();
+    if (lastCol >= CONFIG.FIRST_DAY_COL) {
+      const heads = sheet.getRange(CONFIG.HEADER_ROW, CONFIG.FIRST_DAY_COL, 1, lastCol - CONFIG.FIRST_DAY_COL + 1).getValues()[0];
+      for (let i = 0; i < heads.length; i++) {
+        if (typeof heads[i] === 'string' && heads[i].trim().toLowerCase() === 'hari kerja') return i;
+      }
+    }
+  } catch (e) { Logger.log('getRecapDayCols_: ' + e.message); }
+  return getDayColCount_(sheet);
+}
+
+/**
  * Arsip = nilai beku (rumus sudah dibekukan) sehingga baris rekap harian di bawah tabel (Hadir/Off/Izin/...)
  * masih berisi total SEMUA karyawan walau baris sudah disaring per department. Tulis ulang sebagai rumus
  * COUNTIF atas baris yang tersisa supaya angkanya sesuai dan otomatis mengikuti bila baris ditambah.
  */
 function rebuildRecapRowsInExport_(sheet) {
   const lastEmp = getLastEmployeeRow_(sheet);
-  const dayCount = getDayColCount_(sheet);
+  const dayCount = getRecapDayCols_(sheet);
   if (lastEmp < CONFIG.DATA_START_ROW || dayCount <= 0) return;
   const crit = {
     'hadir': ['1', '2'], 'lembur': ['2'], 'off': ['OFF'], 'off (libur)': ['OFF'], 'libur': ['OFF'],
@@ -103,8 +121,8 @@ function rebuildRecapRowsInExport_(sheet) {
  */
 function restoreRowFormulasInExport_(copied, sheetName) {
   try {
-    if (sheetName !== 'Realisasi') return;
-    const dayCount = getDayColCount_(copied);
+    if (sheetName !== 'Realisasi' && sheetName !== 'Jadwal') return;
+    const dayCount = getRecapDayCols_(copied);
     if (dayCount <= 0) return;
     const col = CONFIG.FIRST_DAY_COL + dayCount;
     if (copied.getLastColumn() < col) return;
@@ -122,10 +140,209 @@ function restoreRowFormulasInExport_(copied, sheetName) {
       if (n[0] === '' || n[0] === null) return;
       const r = CONFIG.DATA_START_ROW + i;
       const rng = first + r + ':' + lastL + r;
-      copied.getRange(r, col).setFormula('=COUNTIF(' + rng + ',"1")+COUNTIF(' + rng + ',"2")*2');
+      copied.getRange(r, col).setFormula(sheetName === 'Jadwal'
+        ? '=COUNTA(' + rng + ')-COUNTIF(' + rng + ',"OFF")' // Jadwal: hari berjadwal = sel terisi selain OFF
+        : '=COUNTIF(' + rng + ',"1")+COUNTIF(' + rng + ',"2")*2');
     });
   } catch (e) {
     Logger.log('restoreRowFormulasInExport_: ' + e.message);
+  }
+}
+
+/**
+ * Rekap harian sheet Jadwal arsip (Shift Pagi/Siang/Malam/Midle, Jumlah Libur, Total Jadwal) juga beku
+ * (total semua karyawan). Tulis ulang sebagai rumus COUNTIF atas baris karyawan yang tersisa.
+ * Kode shift untuk tiap baris diambil dari Setting Jam Kerja: label shift yang diawali kata baris itu
+ * (mis. "Siang" -> S dan S1). Total Jadwal = jumlah baris shift (tanpa OFF), sama seperti aslinya.
+ */
+function rebuildJadwalRecapInExport_(sheet) {
+  try {
+    const lastEmp = getLastEmployeeRow_(sheet);
+    const dayCount = getRecapDayCols_(sheet);
+    if (lastEmp < CONFIG.DATA_START_ROW || dayCount <= 0) return;
+    const shifts = getShiftCodesDynamic_();
+    const codesFor = word => Object.keys(shifts).filter(k => k !== 'OFF' &&
+      String(shifts[k].label || '').trim().toLowerCase().indexOf(word) === 0);
+
+    const from = lastEmp + 1;
+    const numRows = Math.min(30, sheet.getMaxRows() - from + 1);
+    if (numRows <= 0) return;
+    const labels = sheet.getRange(from, 1, numRows, 2).getValues();
+    const letter = c => sheet.getRange(1, c).getA1Notation().replace(/\d+/g, '');
+    const first = letter(CONFIG.FIRST_DAY_COL), lastL = letter(CONFIG.FIRST_DAY_COL + dayCount - 1);
+    const shiftRows = [];
+
+    const write = (row, makeFormula) => {
+      const fm = [];
+      for (let d = 0; d < dayCount; d++) fm.push(makeFormula(letter(CONFIG.FIRST_DAY_COL + d)));
+      sheet.getRange(row, CONFIG.FIRST_DAY_COL, 1, dayCount).setFormulas([fm]);
+      const tc = sheet.getRange(row, CONFIG.FIRST_DAY_COL + dayCount);
+      if (typeof tc.getValue() === 'number') tc.setFormula('=SUM(' + first + row + ':' + lastL + row + ')');
+    };
+
+    for (let i = 0; i < labels.length; i++) {
+      const key = String(labels[i][0] || '').trim().toLowerCase();
+      if (key === 'legenda:' || key === 'legenda') break;
+      if (String(labels[i][1] || '').trim() !== '') continue;
+      const row = from + i;
+
+      if (key.indexOf('shift ') === 0) {
+        const codes = codesFor(key.slice(6).trim());
+        if (!codes.length) continue; // tidak ada kode shift yang cocok: biarkan apa adanya
+        write(row, L => '=' + codes.map(k => 'COUNTIF(' + L + CONFIG.DATA_START_ROW + ':' + L + lastEmp + ',"' + k + '")').join('+'));
+        shiftRows.push(row);
+      } else if (key.indexOf('jumlah libur') === 0) {
+        write(row, L => '=COUNTIF(' + L + CONFIG.DATA_START_ROW + ':' + L + lastEmp + ',"OFF")');
+      } else if (key === 'total jadwal') {
+        // semua sel terisi selain OFF (termasuk kode shift yang tidak punya baris sendiri, mis. WD)
+        write(row, L => '=COUNTA(' + L + CONFIG.DATA_START_ROW + ':' + L + lastEmp + ')-COUNTIF(' + L + CONFIG.DATA_START_ROW + ':' + L + lastEmp + ',"OFF")');
+      }
+    }
+  } catch (e) {
+    Logger.log('rebuildJadwalRecapInExport_: ' + e.message);
+  }
+}
+
+/**
+ * Warna sel jadwal/realisasi pada arsip adalah isian statis (tidak ikut berubah bila isi sel berubah).
+ * Hapus warna statis di area hari, lalu pasang aturan warna otomatis (conditional formatting) per kode
+ * yang warnanya diambil dari LEGENDA di sheet itu sendiri. Kode shift yang tidak ada di legenda
+ * (mis. S1, MD1) memakai warna legenda yang labelnya diawali nama shift tersebut ("Siang 1" -> Siang).
+ */
+function applyLegendColorsInExport_(sheet) {
+  try {
+    const lastEmp = getLastEmployeeRow_(sheet);
+    const dayCount = getDayColCount_(sheet);
+    if (lastEmp < CONFIG.DATA_START_ROW || dayCount <= 0) return;
+
+    const from = lastEmp + 1;
+    const numRows = Math.min(40, sheet.getMaxRows() - from + 1);
+    if (numRows <= 0) return;
+    const block = sheet.getRange(from, 1, numRows, 2);
+    const vals = block.getValues();
+    const bgs = block.getBackgrounds();
+    let start = -1;
+    for (let i = 0; i < vals.length; i++) {
+      if (String(vals[i][0] || '').trim().toLowerCase().indexOf('legenda') === 0) { start = i + 1; break; }
+    }
+    if (start < 0) return;
+
+    const colorOf = {};   // kode -> warna
+    const labelColor = []; // [labelHurufKecil, warna]
+    const isBlankColor = c => !c || c === '#ffffff';
+    for (let i = start; i < vals.length; i++) {
+      const code = vals[i][0];
+      if (code === '' || code === null) break;
+      const color = bgs[i][0];
+      if (isBlankColor(color)) continue;
+      colorOf[String(code).trim().toUpperCase()] = { code: code, color: color };
+      const label = String(vals[i][1] || '').trim().toLowerCase();
+      if (label) labelColor.push([label, color]);
+    }
+
+    // Kode shift yang tidak ada di legenda: pinjam warna legenda yang labelnya awalan label shift.
+    try {
+      const shifts = getShiftCodesDynamic_();
+      Object.keys(shifts).forEach(k => {
+        const key = String(k).toUpperCase();
+        if (colorOf[key]) return;
+        const lab = String(shifts[k].label || '').trim().toLowerCase();
+        const hit = labelColor.find(lc => lab.indexOf(lc[0]) === 0);
+        if (hit) colorOf[key] = { code: k, color: hit[1] };
+      });
+    } catch (e) { /* Setting Jam Kerja tidak terbaca: cukup pakai legenda */ }
+
+    const area = sheet.getRange(CONFIG.DATA_START_ROW, CONFIG.FIRST_DAY_COL, lastEmp - CONFIG.DATA_START_ROW + 1, dayCount);
+    area.setBackground(null);
+
+    const rules = sheet.getConditionalFormatRules();
+    Object.keys(colorOf).forEach(key => {
+      const e = colorOf[key];
+      const variants = (typeof e.code === 'number') ? [e.code]
+        : (/^\d+$/.test(key) ? [Number(key), key] : [key, key.toLowerCase()].filter((v, i, a) => a.indexOf(v) === i));
+      variants.forEach(v => {
+        const b = SpreadsheetApp.newConditionalFormatRule().setRanges([area]);
+        const rule = (typeof v === 'number' ? b.whenNumberEqualTo(v) : b.whenTextEqualTo(v)).setBackground(e.color).build();
+        rules.push(rule);
+      });
+    });
+    sheet.setConditionalFormatRules(rules);
+  } catch (err) {
+    Logger.log('applyLegendColorsInExport_: ' + err.message);
+  }
+}
+
+/**
+ * Warna sel jadwal/realisasi pada arsip adalah warna beku (tidak mengikuti isi sel). Pada salinan ekspor:
+ * baca warna tiap kode dari LEGENDA di bawah tabel, kosongkan warna beku di sel, lalu pasang format
+ * bersyarat (kode = isi sel -> warna legenda). Warna lalu otomatis mengikuti bila kode diubah di Excel.
+ */
+function applyLegendColorRulesInExport_(sheet) {
+  try {
+    const lastEmp = getLastEmployeeRow_(sheet);
+    const dayCount = getDayColCount_(sheet);
+    if (lastEmp < CONFIG.DATA_START_ROW || dayCount <= 0) return;
+
+    const from = lastEmp + 1;
+    const numRows = Math.min(40, sheet.getMaxRows() - from + 1);
+    if (numRows <= 0) return;
+    const labels = sheet.getRange(from, 1, numRows, 1).getValues();
+    let start = -1;
+    for (let i = 0; i < labels.length; i++) {
+      if (String(labels[i][0] || '').trim().toLowerCase().indexOf('legenda') === 0) { start = i + 1; break; }
+    }
+    if (start < 0) return;
+
+    const colors = [];
+    for (let i = start; i < labels.length; i++) {
+      const code = String(labels[i][0] === null || labels[i][0] === undefined ? '' : labels[i][0]).trim();
+      if (!code) break;
+      const bg = String(sheet.getRange(from + i, 1).getBackground() || '').toLowerCase();
+      if (bg && bg !== '#ffffff') colors.push({ code: code.toUpperCase(), color: bg });
+    }
+    if (!colors.length) return;
+
+    const grid = sheet.getRange(CONFIG.DATA_START_ROW, CONFIG.FIRST_DAY_COL, lastEmp - CONFIG.DATA_START_ROW + 1, dayCount);
+    const tl = grid.getA1Notation().split(':')[0]; // sel kiri-atas, mis. D6 (relatif untuk rumus)
+
+    // Kode yang ada di data tapi tidak ada di legenda (mis. S1, MD1, WD): pakai warna yang paling sering dipakainya.
+    const known = {};
+    colors.forEach(c => { known[c.code] = true; });
+    const vals = grid.getValues(), bgs = grid.getBackgrounds();
+    const tally = {};
+    vals.forEach((row, i) => row.forEach((v, j) => {
+      const code = String(v === null || v === undefined ? '' : v).trim().toUpperCase();
+      const bg = String(bgs[i][j] || '').toLowerCase();
+      if (!code || known[code] || !bg || bg === '#ffffff') return;
+      tally[code] = tally[code] || {};
+      tally[code][bg] = (tally[code][bg] || 0) + 1;
+    }));
+    Object.keys(tally).forEach(code => {
+      const best = Object.keys(tally[code]).sort((x, y) => tally[code][y] - tally[code][x])[0];
+      colors.push({ code: code, color: best });
+    });
+
+    grid.setBackground(null);
+    // kolom hari yang tidak terpakai bulan ini (mis. kolom ke-31 pada bulan 30 hari) juga dibersihkan dari warna lama
+    if (dayCount < 31 && sheet.getMaxColumns() >= CONFIG.FIRST_DAY_COL + 30) {
+      sheet.getRange(CONFIG.DATA_START_ROW, CONFIG.FIRST_DAY_COL + dayCount, lastEmp - CONFIG.DATA_START_ROW + 1, 31 - dayCount).setBackground(null);
+    }
+    const rules = colors.map(c => SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied('=UPPER(TRIM(' + tl + '&""))="' + c.code.replace(/"/g, '') + '"')
+      .setBackground(c.color)
+      .setRanges([grid])
+      .build());
+    // Buang aturan buatan fungsi ini yang sudah ada (supaya tidak dobel bila dijalankan ulang di sheet langsung).
+    const keep = sheet.getConditionalFormatRules().filter(r => {
+      try {
+        const bc = r.getBooleanCondition();
+        const v = bc && bc.getCriteriaValues ? String(bc.getCriteriaValues()[0] || '') : '';
+        return v.indexOf('=UPPER(TRIM(') !== 0;
+      } catch (e) { return true; }
+    });
+    sheet.setConditionalFormatRules(rules.concat(keep));
+  } catch (e) {
+    Logger.log('applyLegendColorRulesInExport_: ' + e.message);
   }
 }
 
@@ -179,7 +396,11 @@ function exportSheetExcel(sheetName, token, department, periodKey) {
           keepOnlyDepartmentRows_(copied, dArc);
           if (sheetName === 'Realisasi') rebuildRecapRowsInExport_(copied);
         }
+        if (sheetName === 'Jadwal') rebuildJadwalRecapInExport_(copied);
         restoreRowFormulasInExport_(copied, sheetName);
+        colorDayHeaders_(copied); // arsip lama membawa warna header bulan sebelumnya
+        applyLegendColorRulesInExport_(copied);
+        applyLegendColorsInExport_(copied);
       },
       (copied, fileId) => xlsxDownloadResult_(
         sheetName + '_ARSIP_' + arc.period.replace(/[^\w]+/g, '') + deptSuffixOf_(department) + '_' + dateStr + '.xlsx',
@@ -189,7 +410,15 @@ function exportSheetExcel(sheetName, token, department, periodKey) {
   const deptFilter = String(department || '').trim();
   const isFiltered = deptFilter && deptFilter !== 'ALL';
   return withTempSheetCopy_(getSheet_(sheetName), 'TempXLSX_', sheetName,
-    copied => { if (isFiltered) keepOnlyDepartmentRows_(copied, deptFilter); },
+    copied => {
+      if (isFiltered) keepOnlyDepartmentRows_(copied, deptFilter);
+      if (sheetName === 'Jadwal') { // rekap & Hari Kerja menghitung SEMUA kode shift (S1, MD1, WD, ...)
+        rebuildJadwalRecapInExport_(copied);
+        restoreRowFormulasInExport_(copied, 'Jadwal');
+      }
+      colorDayHeaders_(copied);
+      applyLegendColorRulesInExport_(copied);
+    },
     (copied, fileId) => xlsxDownloadResult_(
       sheetName + (isFiltered ? '_' + deptFilter.replace(/[^\w]+/g, '') : '') + '_' + dateStr + '.xlsx',
       exportSpreadsheetAsXlsxBlob_(fileId, 'Excel ' + sheetName)));
