@@ -41,6 +41,41 @@ function getArchiveSheetNameForExport_(sheetName, periodKey) {
   return { name: name, period: String(found.row[0] || '') };
 }
 
+/**
+ * Arsip = nilai beku (rumus sudah dibekukan) sehingga baris rekap harian di bawah tabel (Hadir/Off/Izin/...)
+ * masih berisi total SEMUA karyawan walau baris sudah disaring per department. Tulis ulang sebagai rumus
+ * COUNTIF atas baris yang tersisa supaya angkanya sesuai dan otomatis mengikuti bila baris ditambah.
+ */
+function rebuildRecapRowsInExport_(sheet) {
+  const lastEmp = getLastEmployeeRow_(sheet);
+  const dayCount = getDayColCount_(sheet);
+  if (lastEmp < CONFIG.DATA_START_ROW || dayCount <= 0) return;
+  const crit = {
+    'hadir': ['1', '2'], 'lembur': ['2'], 'off': ['OFF'], 'off (libur)': ['OFF'], 'libur': ['OFF'],
+    'izin': ['I'], 'alfa': ['A'], 'sakit': ['S'], 'cuti': ['C'], 'resign': ['R']
+  };
+  const from = lastEmp + 1;
+  const numRows = Math.min(30, sheet.getMaxRows() - from + 1);
+  if (numRows <= 0) return;
+  const labels = sheet.getRange(from, 1, numRows, 1).getValues();
+  const colLetter = c => sheet.getRange(1, c).getA1Notation().replace(/\d+/g, '');
+  labels.forEach((l, i) => {
+    const key = String(l[0] || '').trim().toLowerCase();
+    if (!crit[key]) return;
+    const row = from + i;
+    const formulas = [];
+    for (let d = 0; d < dayCount; d++) {
+      const L = colLetter(CONFIG.FIRST_DAY_COL + d);
+      const rng = L + CONFIG.DATA_START_ROW + ':' + L + lastEmp;
+      formulas.push(crit[key].map(k => 'COUNTIF(' + rng + ',"' + k + '")').join('+'));
+    }
+    sheet.getRange(row, CONFIG.FIRST_DAY_COL, 1, dayCount).setFormulas([formulas.map(f => '=' + f)]);
+    const first = colLetter(CONFIG.FIRST_DAY_COL), last = colLetter(CONFIG.FIRST_DAY_COL + dayCount - 1);
+    const totalCell = sheet.getRange(row, CONFIG.FIRST_DAY_COL + dayCount);
+    if (typeof totalCell.getValue() === 'number') totalCell.setFormula('=SUM(' + first + row + ':' + last + row + ')');
+  });
+}
+
 function deptSuffixOf_(department) {
   const d = String(department || '').trim();
   return (d && d !== 'ALL') ? '_' + d.replace(/[^\w]+/g, '') : '';
@@ -85,7 +120,13 @@ function exportSheetExcel(sheetName, token, department, periodKey) {
     const src = getSpreadsheet_().getSheetByName(arc.name);
     const dArc = String(department || '').trim();
     return withTempSheetCopy_(src, 'TempXLSX_Arsip_', sheetName,
-      copied => { copied.showSheet(); if (dArc && dArc !== 'ALL') keepOnlyDepartmentRows_(copied, dArc); },
+      copied => {
+        copied.showSheet();
+        if (dArc && dArc !== 'ALL') {
+          keepOnlyDepartmentRows_(copied, dArc);
+          if (sheetName === 'Realisasi') rebuildRecapRowsInExport_(copied);
+        }
+      },
       (copied, fileId) => xlsxDownloadResult_(
         sheetName + '_ARSIP_' + arc.period.replace(/[^\w]+/g, '') + deptSuffixOf_(department) + '_' + dateStr + '.xlsx',
         exportSpreadsheetAsXlsxBlob_(fileId, 'Excel arsip')));

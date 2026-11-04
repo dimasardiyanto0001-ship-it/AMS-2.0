@@ -17,6 +17,8 @@
  *     bersihkanJamNyangkutOFF()           kosongkan jam yang nyangkut di sel OFF
  *     fixJamKerjaPeriodeAktifSekarang()   kosongkan semua JamKerja/JamScan periode aktif
  *     backfillRekapBulananDariArsip()     isi Rekap_Bulanan dari semua periode arsip
+ *     cekRumusRekapitulasi()              LAPORAN: baris karyawan tanpa rumus / rekap yang belum mencakup semua baris
+ *     perbaikiRumusRekapitulasi()         perbaiki yang di atas di Jadwal & Realisasi periode aktif
  *************************************************************/
 
 /* ============================ HELPER ============================ */
@@ -378,4 +380,71 @@ function backfillRekapBulananDariArsip() {
 
   showAlertQuietly_('Backfill selesai. ' + sukses + ' periode berhasil disnapshot.' +
     (gagal.length ? '\n\nGagal:\n' + gagal.join('\n') : ''));
+}
+
+
+/* ============================ RUMUS REKAPITULASI ============================ */
+
+/** Analisis (dan opsional perbaiki) rumus di Jadwal & Realisasi periode aktif. */
+function analisisRumusRekapitulasi_(terapkan) {
+  const laporan = [];
+  [CONFIG.SHEET_JADWAL, CONFIG.SHEET_REALISASI].forEach(name => {
+    const sheet = getSheet_(name);
+    const lastEmp = getLastEmployeeRow_(sheet);
+    const dayCount = getDayColCount_(sheet);
+    const extraStart = CONFIG.FIRST_DAY_COL + dayCount;
+    const lastCol = sheet.getLastColumn();
+    const nExtra = lastCol - extraStart + 1;
+    if (lastEmp < CONFIG.DATA_START_ROW) return;
+
+    // 1) Kolom rumus di kanan kolom hari (mis. "Hari Kerja"): baris yang kosong padahal baris lain berisi rumus.
+    let tanpaRumus = [];
+    let templateRow = 0;
+    if (nExtra > 0) {
+      const f = sheet.getRange(CONFIG.DATA_START_ROW, extraStart, lastEmp - CONFIG.DATA_START_ROW + 1, nExtra).getFormulas();
+      f.forEach((row, i) => {
+        const adaRumus = row.some(x => x);
+        if (adaRumus) templateRow = CONFIG.DATA_START_ROW + i;
+      });
+      f.forEach((row, i) => {
+        const r = CONFIG.DATA_START_ROW + i;
+        const nama = sheet.getRange(r, 2).getValue();
+        if (nama !== '' && !row.some(x => x) && templateRow) tanpaRumus.push(r);
+      });
+      if (terapkan && templateRow) {
+        tanpaRumus.forEach(r => sheet.getRange(templateRow, extraStart, 1, nExtra).copyTo(sheet.getRange(r, extraStart, 1, nExtra)));
+      }
+    }
+
+    // 2) Rumus rekap di bawah tabel yang range-nya berakhir sebelum baris karyawan terakhir.
+    const from = lastEmp + 1;
+    const numRows = Math.min(40, sheet.getMaxRows() - from + 1);
+    let belumMencakup = 0;
+    if (numRows > 0 && lastCol > 0) {
+      const formulas = sheet.getRange(from, 1, numRows, lastCol).getFormulas();
+      formulas.forEach((row, r) => row.forEach((fm, c) => {
+        if (!fm) return;
+        const nf = String(fm).replace(/(\$?[A-Z]{1,3}\$?)(\d+):(\$?[A-Z]{1,3}\$?)(\d+)/g, (m, c1, r1, c2, r2) =>
+          (Number(r1) === CONFIG.DATA_START_ROW && Number(r2) >= CONFIG.DATA_START_ROW && Number(r2) < lastEmp) ? c1 + r1 + ':' + c2 + lastEmp : m);
+        if (nf !== fm) {
+          belumMencakup++;
+          if (terapkan) sheet.getRange(from + r, 1 + c).setFormula(nf);
+        }
+      }));
+    }
+    laporan.push(name + ': baris karyawan terakhir = ' + lastEmp + '; baris tanpa rumus kolom kanan = ' +
+      (tanpaRumus.length ? tanpaRumus.join(', ') : '-') + '; rumus rekap yang belum mencakup semua baris = ' + belumMencakup);
+  });
+  if (terapkan) SpreadsheetApp.flush();
+  return laporan.join('\n');
+}
+
+/** Hanya melaporkan (tidak mengubah apa pun). */
+function cekRumusRekapitulasi() {
+  showAlertQuietly_('CEK RUMUS (tidak ada yang diubah)\n' + analisisRumusRekapitulasi_(false));
+}
+
+/** Perbaiki rumus Jadwal & Realisasi periode aktif; sheet arsip tidak disentuh. */
+function perbaikiRumusRekapitulasi() {
+  showAlertQuietly_('PERBAIKAN RUMUS selesai (yang dilaporkan sudah diperbaiki)\n' + analisisRumusRekapitulasi_(true));
 }

@@ -69,12 +69,56 @@ function setAssignmentStatus_(nikSheet, nama, statusBaru) {
   if (idx !== -1) nikSheet.getRange(idx + 2, EMP_COL.STATUS_ASSIGNMENT).setValue(statusBaru);
 }
 
-/** Sisipkan satu baris karyawan baru (No, Nama, Jabatan, sel hari kosong) setelah baris afterRow. */
+/**
+ * Sisipkan satu baris karyawan baru (No, Nama, Jabatan, sel hari kosong) setelah baris afterRow.
+ * Rumus ikut: kolom setelah kolom hari (mis. "Hari Kerja") disalin dari baris di atasnya, dan rumus
+ * rekap di bawah tabel (COUNTIF dst.) diperlebar sampai baris baru. Tanpa ini baris baru "di luar"
+ * jangkauan rumus (insert setelah baris terakhir tidak memperlebar range Sheets).
+ */
 function insertEmployeeRowAfter_(sheet, afterRow, newNo, nama, jabatan, dayCount) {
   const newRow = afterRow + 1;
   sheet.insertRowAfter(afterRow);
   sheet.getRange(newRow, 1, 1, 3).setValues([[newNo, nama, jabatan]]);
   if (dayCount > 0) sheet.getRange(newRow, CONFIG.FIRST_DAY_COL, 1, dayCount).setValue('');
+  extendFormulasToEmployeeRow_(sheet, afterRow, newRow, dayCount);
+}
+
+/** Salin kolom rumus di kanan kolom hari dari baris sumber, lalu lebarkan rumus rekap di bawah tabel. */
+function extendFormulasToEmployeeRow_(sheet, srcRow, newRow, dayCount) {
+  try {
+    const extraStart = CONFIG.FIRST_DAY_COL + dayCount;
+    const lastCol = sheet.getLastColumn();
+    if (srcRow >= CONFIG.DATA_START_ROW && lastCol >= extraStart) {
+      const n = lastCol - extraStart + 1;
+      sheet.getRange(srcRow, extraStart, 1, n).copyTo(sheet.getRange(newRow, extraStart, 1, n));
+    }
+    extendSummaryRanges_(sheet, srcRow, newRow);
+  } catch (e) {
+    Logger.log('extendFormulasToEmployeeRow_ (' + sheet.getName() + '): ' + e.message);
+  }
+}
+
+/** Ganti akhir range "X6:Y<oldLast>" jadi "X6:Y<newLast>" pada satu teks rumus. */
+function widenRangeEndInFormula_(formula, oldLast, newLast) {
+  return String(formula).replace(/(\$?[A-Z]{1,3}\$?)(\d+):(\$?[A-Z]{1,3}\$?)(\d+)/g, (m, c1, r1, c2, r2) =>
+    (Number(r1) === CONFIG.DATA_START_ROW && Number(r2) === oldLast) ? c1 + r1 + ':' + c2 + newLast : m);
+}
+
+/** Rumus di bawah tabel karyawan yang berakhir di baris oldLast diperlebar ke newLast. */
+function extendSummaryRanges_(sheet, oldLast, newLast) {
+  const from = newLast + 1;
+  const numRows = Math.min(40, sheet.getMaxRows() - from + 1);
+  const lastCol = sheet.getLastColumn();
+  if (numRows <= 0 || lastCol < 1) return 0;
+  const range = sheet.getRange(from, 1, numRows, lastCol);
+  const formulas = range.getFormulas();
+  let changed = 0;
+  formulas.forEach((row, r) => row.forEach((f, c) => {
+    if (!f) return;
+    const nf = widenRangeEndInFormula_(f, oldLast, newLast);
+    if (nf !== f) { sheet.getRange(from + r, 1 + c).setFormula(nf); changed++; }
+  }));
+  return changed;
 }
 
 /**
