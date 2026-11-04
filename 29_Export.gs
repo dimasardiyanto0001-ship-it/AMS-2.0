@@ -57,23 +57,42 @@ function rebuildRecapRowsInExport_(sheet) {
   const from = lastEmp + 1;
   const numRows = Math.min(30, sheet.getMaxRows() - from + 1);
   if (numRows <= 0) return;
-  const labels = sheet.getRange(from, 1, numRows, 1).getValues();
+  const labels = sheet.getRange(from, 1, numRows, 2).getValues(); // kolom A (label) + B (legenda punya isi di B)
   const colLetter = c => sheet.getRange(1, c).getA1Notation().replace(/\d+/g, '');
-  labels.forEach((l, i) => {
-    const key = String(l[0] || '').trim().toLowerCase();
-    if (!crit[key]) return;
+  const first = colLetter(CONFIG.FIRST_DAY_COL), last = colLetter(CONFIG.FIRST_DAY_COL + dayCount - 1);
+  let firstRecap = 0, lastRecap = 0;
+
+  for (let i = 0; i < labels.length; i++) {
+    const key = String(labels[i][0] || '').trim().toLowerCase();
+    if (key === 'legenda:' || key === 'legenda') break; // legenda di bawahnya bukan baris rekap
     const row = from + i;
+
+    if (key === 'jumlah man power') {
+      if (!firstRecap) continue;
+      const fm = [];
+      for (let d = 0; d < dayCount; d++) {
+        const L = colLetter(CONFIG.FIRST_DAY_COL + d);
+        fm.push('=SUM(' + L + firstRecap + ':' + L + lastRecap + ')');
+      }
+      sheet.getRange(row, CONFIG.FIRST_DAY_COL, 1, dayCount).setFormulas([fm]);
+      const tc = sheet.getRange(row, CONFIG.FIRST_DAY_COL + dayCount);
+      if (typeof tc.getValue() === 'number') tc.setFormula('=SUM(' + first + row + ':' + last + row + ')');
+      continue;
+    }
+    if (!crit[key] || String(labels[i][1] || '').trim() !== '') continue;
+
     const formulas = [];
     for (let d = 0; d < dayCount; d++) {
       const L = colLetter(CONFIG.FIRST_DAY_COL + d);
       const rng = L + CONFIG.DATA_START_ROW + ':' + L + lastEmp;
-      formulas.push(crit[key].map(k => 'COUNTIF(' + rng + ',"' + k + '")').join('+'));
+      formulas.push('=' + crit[key].map(k => 'COUNTIF(' + rng + ',"' + k + '")').join('+'));
     }
-    sheet.getRange(row, CONFIG.FIRST_DAY_COL, 1, dayCount).setFormulas([formulas.map(f => '=' + f)]);
-    const first = colLetter(CONFIG.FIRST_DAY_COL), last = colLetter(CONFIG.FIRST_DAY_COL + dayCount - 1);
+    sheet.getRange(row, CONFIG.FIRST_DAY_COL, 1, dayCount).setFormulas([formulas]);
     const totalCell = sheet.getRange(row, CONFIG.FIRST_DAY_COL + dayCount);
     if (typeof totalCell.getValue() === 'number') totalCell.setFormula('=SUM(' + first + row + ':' + last + row + ')');
-  });
+    if (!firstRecap) firstRecap = row;
+    lastRecap = row;
+  }
 }
 
 /**
@@ -86,16 +105,27 @@ function restoreRowFormulasInExport_(copied, sheetName) {
   try {
     const live = getSheet_(sheetName);
     const dayCount = getDayColCount_(copied);
-    if (dayCount <= 0 || getDayColCount_(live) !== dayCount) return;
+    if (dayCount <= 0) return;
     const extraStart = CONFIG.FIRST_DAY_COL + dayCount;
-    const nExtra = Math.min(live.getLastColumn(), copied.getLastColumn()) - extraStart + 1;
-    if (nExtra <= 0) return;
+    const nExtra = Math.min(live.getLastColumn(), copied.getLastColumn(), extraStart) - extraStart + 1; // hanya kolom pertama (Hari Kerja)
+    let tpl = null;
 
-    const liveLast = getLastEmployeeRow_(live);
-    if (liveLast < CONFIG.DATA_START_ROW) return;
-    const liveF = live.getRange(CONFIG.DATA_START_ROW, extraStart, liveLast - CONFIG.DATA_START_ROW + 1, nExtra).getFormulasR1C1();
-    const tpl = liveF.find(row => row.some(x => x));
-    if (!tpl) return;
+    if (getDayColCount_(live) === dayCount) {
+      const liveLast = getLastEmployeeRow_(live);
+      if (liveLast >= CONFIG.DATA_START_ROW) {
+        const liveF = live.getRange(CONFIG.DATA_START_ROW, extraStart, liveLast - CONFIG.DATA_START_ROW + 1, 1).getFormulasR1C1();
+        tpl = liveF.find(row => row.some(x => x)) || null;
+      }
+    }
+    if (!tpl) {
+      // Jumlah hari periode arsip beda dengan periode aktif: pakai rumus baku Hari Kerja
+      // (kode 1 = 1 hari, kode 2 lembur = 2 hari) bila kolomnya memang berjudul "Hari Kerja".
+      const head = String(copied.getRange(CONFIG.HEADER_ROW, extraStart).getValue() || '').trim().toLowerCase();
+      if (sheetName !== 'Realisasi' || head !== 'hari kerja') return;
+      const rng = 'RC[-' + dayCount + ']:RC[-1]';
+      tpl = ['=COUNTIF(' + rng + ',"1")+COUNTIF(' + rng + ',"2")*2'];
+    }
+    if (nExtra <= 0) return;
 
     const last = getLastEmployeeRow_(copied);
     const numRows = last - CONFIG.DATA_START_ROW + 1;
