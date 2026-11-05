@@ -103,7 +103,8 @@ function rebuildRecapRowsInExport_(sheet) {
     for (let d = 0; d < dayCount; d++) {
       const L = colLetter(CONFIG.FIRST_DAY_COL + d);
       const rng = L + CONFIG.DATA_START_ROW + ':' + L + lastEmp;
-      formulas.push('=' + crit[key].map(k => 'COUNTIF(' + rng + ',"' + k + '")').join('+'));
+      // Sama dengan rumus sheet aktif (=SUM): kode "2" (lembur/gantiin shift) dihitung 2 pada baris Hadir.
+      formulas.push('=' + crit[key].map(k => 'COUNTIF(' + rng + ',"' + k + '")' + ((key === 'hadir' && k === '2') ? '*2' : '')).join('+'));
     }
     sheet.getRange(row, CONFIG.FIRST_DAY_COL, 1, dayCount).setFormulas([formulas]);
     const totalCell = sheet.getRange(row, CONFIG.FIRST_DAY_COL + dayCount);
