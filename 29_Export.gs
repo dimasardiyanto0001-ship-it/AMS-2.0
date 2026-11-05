@@ -392,10 +392,10 @@ function exportSheetExcel(sheetName, token, department, periodKey) {
     return withTempSheetCopy_(src, 'TempXLSX_Arsip_', sheetName,
       copied => {
         copied.showSheet();
-        if (dArc && dArc !== 'ALL') {
-          keepOnlyDepartmentRows_(copied, dArc);
-          if (sheetName === 'Realisasi') rebuildRecapRowsInExport_(copied);
-        }
+        if (dArc && dArc !== 'ALL') keepOnlyDepartmentRows_(copied, dArc);
+        // Angka rekap arsip beku: hitung ulang dari baris yang ada (juga tanpa filter, karena karyawan yang
+        // ditambah belakangan bisa berada di luar jangkauan rumus lama).
+        if (sheetName === 'Realisasi') rebuildRecapRowsInExport_(copied);
         if (sheetName === 'Jadwal') rebuildJadwalRecapInExport_(copied);
         restoreRowFormulasInExport_(copied, sheetName);
         colorDayHeaders_(copied); // arsip lama membawa warna header bulan sebelumnya
