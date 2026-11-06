@@ -3592,13 +3592,14 @@ function sendAIChatMessage() {
     document.getElementById('brandCompany').value = BRAND_.companyName || '';
     document.getElementById('brandDept').value = BRAND_.departmentName || '';
     document.getElementById('brandLogo').value = BRAND_.logoUrl || '';
+    document.getElementById('brandLembur').value = BRAND_.lemburMinHours || 5;
   }
   function saveBrandSettings_() {
     const btn = document.getElementById('brandSaveBtn'); btn.disabled = true;
     const cfg = {
       appName: document.getElementById('brandAppName').value, appShort: document.getElementById('brandAppShort').value,
       companyName: document.getElementById('brandCompany').value, departmentName: document.getElementById('brandDept').value,
-      logoUrl: document.getElementById('brandLogo').value
+      logoUrl: document.getElementById('brandLogo').value, lemburMinHours: document.getElementById('brandLembur').value
     };
     google.script.run.withSuccessHandler(c => {
       btn.disabled = false; BRAND_ = c; applyBrand_();

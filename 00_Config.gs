@@ -71,7 +71,7 @@ const CONFIG = {
   // Target jam kerja per kode shift
   SHIFT_HOURS_TARGET: { 'P': 8, 'S': 8, 'M': 8, 'MD': 8, 'WD': 5, 'OFF': 0 },
 
-  // Jam lembur >= nilai ini -> Realisasi ditandai "2"
+  // Jam lembur >= nilai ini -> Realisasi ditandai "2". Nilai efektif diatur di Setting > Perusahaan (getLemburMinHours_()).
   LEMBUR_MIN_HOURS: 5,
 
   // Whitelist sheet yang boleh diexport PDF
