@@ -28,11 +28,12 @@
 
 /** File HTML utama (nama file di Apps Script, tanpa .html). Samakan huruf besar/kecilnya. */
 const HTML_ENTRY_FILE = 'Index';
-const APP_TITLE = 'Attendance Monitoring System (AMS) - Departemen Housekeeping PT Swadharma Primautama';
 
 const ROUTES = {
   /* ---- AUTH & AKUN ---- */
   login: { fn: 'login', args: ['username', 'password'], public: true },
+  getBrandConfig: { fn: 'getBrandConfig', args: [], public: true },
+  saveBrandConfig: { fn: 'saveBrandConfig', args: ['config', 'token'] },
   logout: { fn: 'logout', args: ['token'] },
   changeOwnPassword: { fn: 'changeOwnPassword', args: ['oldPassword', 'newPassword', 'token'] },
   getUsersList: { fn: 'getUsersList', args: ['token'] },
@@ -168,7 +169,7 @@ function doGet(e) {
   }
 
   return HtmlService.createTemplateFromFile(HTML_ENTRY_FILE).evaluate()
-    .setTitle(APP_TITLE)
+    .setTitle(getBrandConfig_().fullTitle)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }

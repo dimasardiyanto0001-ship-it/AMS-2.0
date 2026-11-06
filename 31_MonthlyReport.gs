@@ -294,7 +294,7 @@ function buildMonthlyReportHtml_(periodText, dashboard, analysis, notice) {
   return '' +
     '<div style="font-family:Arial,Helvetica,sans-serif;max-width:700px;margin:0 auto;color:#1e293b;">' +
       '<h2 style="color:#1e3a8a;margin-bottom:2px;">📊 Laporan Bulanan Kehadiran</h2>' +
-      '<p style="color:#64748b;margin-top:0;">Departemen Housekeeping - PT Swadharma Primautama &mdash; Periode: <strong>' + esc(periodText) + '</strong></p>' +
+      '<p style="color:#64748b;margin-top:0;">' + brandEsc_(getBrandConfig_().orgLine) + ' &mdash; Periode: <strong>' + esc(periodText) + '</strong></p>' +
       noticeHtml +
 
       '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin:16px 0;">' +
