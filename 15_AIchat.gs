@@ -208,7 +208,10 @@ function buildAIShiftContext_(data, todayDay) {
 }
 
 /** Ringkasan data periode aktif yang dikirim ke AI sebagai konteks (bukan seluruh raw sheet). */
-function buildAIDataContext_() {
+/** Pertanyaan yang menyangkut shift/personil jaga? Hanya itu yang perlu data shift (menjaga konteks tetap kecil & cepat). */
+const AI_SHIFT_QUESTION_RE_ = /shift|pagi|siang|malam|midle|middle|weekend|personil|personel|jaga|giliran|\b(md1?|s1|wd)\b/i;
+
+function buildAIDataContext_(message) {
   const data = getAllDataInternal_();
   const daily = buildAIDailyContext_(data);
   const now = new Date();
@@ -220,15 +223,13 @@ function buildAIDataContext_() {
     const m = Number(Utilities.formatDate(now, 'Asia/Jakarta', 'M')) - 1;
     if (my && my.year === y && my.monthIndex === m) todayDay = Number(Utilities.formatDate(now, 'Asia/Jakarta', 'd'));
   } catch (e) { todayDay = null; }
-  const shift = buildAIShiftContext_(data, todayDay);
-  return {
+  const withShift = AI_SHIFT_QUESTION_RE_.test(String(message || ''));
+  const shift = withShift ? buildAIShiftContext_(data, todayDay) : null;
+  const ctx = {
     period: data.period,
     dayCount: data.dayCount,
     tanggalHariIni: Utilities.formatDate(now, 'Asia/Jakarta', 'yyyy-MM-dd'),
     nomorHariIni: todayDay,
-    kodeShift: shift.kodeShift,
-    jumlahPerShift: shift.jumlahPerShift,
-    detailShift: shift.detailShift,
     dashboard: data.dashboard,
     harian: daily.harian,
     perKaryawan: daily.perKaryawan,
@@ -239,6 +240,12 @@ function buildAIDataContext_() {
       kekuranganJam: r.kekuranganJam
     }))
   };
+  if (shift) {
+    ctx.kodeShift = shift.kodeShift;
+    ctx.jumlahPerShift = shift.jumlahPerShift;
+    ctx.detailShift = shift.detailShift;
+  }
+  return ctx;
 }
 
 /** Bulatkan & jepit nomor tanggal ke 1..dayCount; nilai tak terbaca -> fallback. */
@@ -264,7 +271,7 @@ function chatWithAI(pesan, token) {
     throw new Error('Pesan terlalu panjang (maks ' + AI_MAX_MESSAGE_LENGTH_ + ' karakter).');
   }
 
-  const context = buildAIDataContext_();
+  const context = buildAIDataContext_(message);
 
   const systemInstruction =
     'Anda asisten AI untuk sistem absensi karyawan. JAWAB HANYA berdasarkan data konteks JSON yang diberikan, ' +
