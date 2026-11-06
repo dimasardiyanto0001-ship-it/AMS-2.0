@@ -56,7 +56,7 @@
 <body>
   <div class="card">
     <h1>📋 Pengajuan Izin / Sakit / Cuti</h1>
-    <p class="sub">Departemen Housekeeping — PT Swadharma Primautama</p>
+    <p class="sub" data-brand="orgLine">Departemen Housekeeping - PT Swadharma Primautama</p>
 
     <label>Nama</label>
     <select id="fNama"><option value="">Memuat daftar nama...</option></select>
@@ -98,6 +98,15 @@
 <script>
   // WAJIB DIISI: URL hasil Deploy > Manage deployments > Web app di Apps Script Editor.
   const GAS_WEBAPP_URL_ = 'https://script.google.com/macros/s/AKfycbz4biHCLo-Dx7J10l0ZAR4G2coXZfbbEm2AyIPol8iLXkQ-rMl57TS5okJGaiG4BwsOuQ/exec';
+
+
+  var BRAND_ = { appShort: 'AMS', companyName: 'PT Swadharma Primautama', departmentName: 'Housekeeping', departmentLabel: 'Departemen Housekeeping', orgLine: 'Departemen Housekeeping - PT Swadharma Primautama' };
+  function applyBrand_() {
+    document.querySelectorAll('[data-brand]').forEach(el => { el.textContent = BRAND_[el.dataset.brand] || ''; });
+    document.title = document.title.replace(/AMS Housekeeping/, (BRAND_.appShort + ' ' + BRAND_.departmentName).trim());
+  }
+  try { const c = JSON.parse(localStorage.getItem('ams_brand_v1') || 'null'); if (c && c.appName) { BRAND_ = c; applyBrand_(); } } catch (e) {}
+  callGas_('getBrandConfig', {}, c => { if (c && c.appName) { BRAND_ = c; applyBrand_(); try { localStorage.setItem('ams_brand_v1', JSON.stringify(c)); } catch (e) {} } }, () => {});
 
   function callGas_(action, body, onSuccess, onFailure) {
     body.action = action;

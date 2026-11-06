@@ -450,7 +450,7 @@ function kirimEmailNotifikasiPengajuan_(nama, jenis, tglMulai, tglAkhir, statusB
     }
 
     htmlBody += '' +
-        '<p style="color:#94a3b8;font-size:12px;margin-top:24px;">Email ini dikirim otomatis oleh Attendance Monitoring System (AMS) - Departemen Housekeeping PT Swadharma Primautama.</p>' +
+        '<p style="color:#94a3b8;font-size:12px;margin-top:24px;">Email ini dikirim otomatis oleh ' + brandEsc_(getBrandConfig_().fullTitle) + '.</p>' +
       '</div>';
 
     MailApp.sendEmail({ to: email, subject: subject, htmlBody: htmlBody });

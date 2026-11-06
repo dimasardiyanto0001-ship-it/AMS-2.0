@@ -120,7 +120,8 @@ const MENU_LIST = [
   { key: 'exportsheetpdf',     label: 'Export PDF Sheet (Rekap/Dashboard/Jadwal/Realisasi)' },
   { key: 'templatejadwal',     label: 'Download Template Jadwal' },
   { key: 'pengajuanizin',      label: 'Pengajuan Izin' },
-  { key: 'persetujuanjadwal',  label: 'Persetujuan Jadwal' }
+  { key: 'persetujuanjadwal',  label: 'Persetujuan Jadwal' },
+  { key: 'settingperusahaan',  label: 'Setting - Perusahaan' }
 ];
 
 const REPORT_TYPE_TO_MENU = {
