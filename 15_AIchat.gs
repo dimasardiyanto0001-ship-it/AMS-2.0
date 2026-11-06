@@ -162,14 +162,73 @@ function buildAIDailyContext_(data) {
   return { harian: harian, perKaryawan: perKaryawan };
 }
 
+/**
+ * Data SHIFT dari Jadwal supaya AI bisa menjawab "shift pagi/midle hari ini berapa personil", dst.
+ *  - kodeShift: kode -> nama shift (dari Setting Jam Kerja)
+ *  - jumlahPerShift: per tanggal, jumlah orang per kode shift (OFF dihitung juga sebagai kode "OFF")
+ *  - detailShift: nama per shift HANYA untuk hari ini dan besok (ringkas; hari lain cukup jumlahnya),
+ *    hari ini disertai status absen (hadir/belum diisi/izin/dst.)
+ */
+function buildAIShiftContext_(data, todayDay) {
+  const dayCount = Number(data.dayCount) || 0;
+  const kodeShift = {};
+  try {
+    const sc = getShiftCodesDynamic_();
+    Object.keys(sc).forEach(k => { kodeShift[k] = String((sc[k] && sc[k].label) || k); });
+  } catch (e) { /* tanpa label: AI memakai kodenya saja */ }
+
+  const realByName = {};
+  (data.realisasi || []).forEach(e => { realByName[nameKey_(e.nama)] = e.days || []; });
+  const statusText = c => c === '1' ? 'hadir' : c === '2' ? 'hadir (lembur)' : c === 'A' ? 'alfa' : c === 'I' ? 'izin'
+    : c === 'S' ? 'sakit' : c === 'C' ? 'cuti' : c === 'OFF' ? 'off' : c === '' ? 'belum diisi' : c;
+
+  const counts = [];
+  for (let i = 0; i < dayCount; i++) counts.push({ tanggal: i + 1 });
+  const detail = {};
+  const detailDays = {};
+  if (todayDay) { detailDays[todayDay] = true; if (todayDay + 1 <= dayCount) detailDays[todayDay + 1] = true; }
+
+  (data.jadwal || []).forEach(emp => {
+    const nama = String(emp.nama || '').trim();
+    if (!nama) return;
+    const days = emp.days || [];
+    for (let i = 0; i < dayCount; i++) {
+      const code = cellCode_(days[i]);
+      if (!code) continue;
+      counts[i][code] = (counts[i][code] || 0) + 1;
+      const tgl = i + 1;
+      if (detailDays[tgl] && code !== 'OFF') {
+        detail[tgl] = detail[tgl] || {};
+        (detail[tgl][code] = detail[tgl][code] || []).push(
+          tgl === todayDay ? nama + ' (' + statusText(cellCode_((realByName[nameKey_(nama)] || [])[i])) + ')' : nama);
+      }
+    }
+  });
+  return { kodeShift: kodeShift, jumlahPerShift: counts, detailShift: detail };
+}
+
 /** Ringkasan data periode aktif yang dikirim ke AI sebagai konteks (bukan seluruh raw sheet). */
 function buildAIDataContext_() {
   const data = getAllDataInternal_();
   const daily = buildAIDailyContext_(data);
+  const now = new Date();
+  // Tanggal hari ini sebagai nomor hari di periode aktif (null bila periode aktif bukan bulan berjalan).
+  let todayDay = null;
+  try {
+    const my = parsePeriodMonthYear_(data.period);
+    const y = Number(Utilities.formatDate(now, 'Asia/Jakarta', 'yyyy'));
+    const m = Number(Utilities.formatDate(now, 'Asia/Jakarta', 'M')) - 1;
+    if (my && my.year === y && my.monthIndex === m) todayDay = Number(Utilities.formatDate(now, 'Asia/Jakarta', 'd'));
+  } catch (e) { todayDay = null; }
+  const shift = buildAIShiftContext_(data, todayDay);
   return {
     period: data.period,
     dayCount: data.dayCount,
-    tanggalHariIni: Utilities.formatDate(new Date(), 'Asia/Jakarta', 'yyyy-MM-dd'),
+    tanggalHariIni: Utilities.formatDate(now, 'Asia/Jakarta', 'yyyy-MM-dd'),
+    nomorHariIni: todayDay,
+    kodeShift: shift.kodeShift,
+    jumlahPerShift: shift.jumlahPerShift,
+    detailShift: shift.detailShift,
     dashboard: data.dashboard,
     harian: daily.harian,
     perKaryawan: daily.perKaryawan,
@@ -217,6 +276,11 @@ function chatWithAI(pesan, token) {
     'Kalau user tidak sebutkan alamat email, isi tujuanEmail dengan null. ' +
     'DATA HARIAN: "harian" berisi per tanggal daftar nama untuk status hadir, lembur, alfa, izin, sakit, cuti, off, belumDiisi, lainnya ' +
     '(status yang tidak ada orangnya tidak ditulis). "perKaryawan" berisi daftar tanggal alfa/izin/sakit/cuti per orang. ' +
+    'DATA SHIFT: "kodeShift" = kode -> nama shift (mis. P=Pagi, MD=Midle). "jumlahPerShift" = per tanggal jumlah orang yang DIJADWALKAN di tiap kode shift (termasuk OFF). ' +
+    '"detailShift" = nama orang per kode shift hanya untuk nomorHariIni (beserta status absen hari itu) dan hari sesudahnya; hari lain hanya ada jumlahnya. ' +
+    'Pertanyaan "shift X hari ini berapa personil / siapa" dijawab dari jumlahPerShift/detailShift pada nomorHariIni; gabungkan beberapa kode bila perlu ' +
+    '(mis. Siang = S + S1, Midle = MD + MD1 — lihat kodeShift). Sebutkan juga berapa yang sudah hadir bila ditanya. ' +
+    'Bila yang ditanya adalah shift pada tanggal lain, jawab jumlahnya dari jumlahPerShift dan katakan namanya tidak tersedia kecuali hari ini/besok. ' +
     '"Tidak masuk" berarti alfa + izin + sakit + cuti; "off" adalah libur terjadwal, sebutkan terpisah dan jangan dihitung tidak masuk. ' +
     '"belumDiisi" = dijadwalkan masuk tetapi realisasi masih kosong; untuk tanggal setelah tanggalHariIni artinya belum terjadi, bukan tidak masuk. ' +
     'Untuk pertanyaan per tanggal atau per orang, sebutkan SEMUA nama/tanggal yang relevan beserta jumlahnya dan jangan dipotong. ' +
