@@ -370,7 +370,7 @@ function tandaiLemburBilaPerlu_(ss, realisasiSheet, rowNum, col, jamKerja) {
     const info = kode && kode !== 'OFF' ? getShiftCodesDynamic_()[kode] : null;
     if (info && isFinite(Number(info.targetJam))) target = Number(info.targetJam);
   } catch (e) { /* jadwal tak terbaca: pakai target default */ }
-  if (jamKerja - target < CONFIG.LEMBUR_MIN_HOURS) return;
+  if (jamKerja - target < getLemburMinHours_()) return;
 
   const cell = realisasiSheet.getRange(rowNum, col);
   const code = String(cell.getValue() === null ? '' : cell.getValue()).trim().toUpperCase();

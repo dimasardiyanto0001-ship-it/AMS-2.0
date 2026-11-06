@@ -182,7 +182,7 @@ function applyFingerRowsToRealisasi_(rows) {
       const currentCode = (currentRaw === null || currentRaw === undefined) ? '' : String(currentRaw).trim().toUpperCase();
 
       if (FINGER_PROTECTED_CODES_.indexOf(currentCode) === -1) {
-        const isLembur = row.lemburJam >= CONFIG.LEMBUR_MIN_HOURS;
+        const isLembur = row.lemburJam >= getLemburMinHours_();
         currentRealisasi[idx][dayIdx] = isLembur ? 2 : 1;
         filled++;
         if (isLembur) filledOvertime++;

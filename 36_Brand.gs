@@ -12,7 +12,8 @@ const BRAND_DEFAULTS_ = {
   appShort: 'AMS',
   companyName: 'PT Swadharma Primautama',
   departmentName: 'Housekeeping',
-  logoUrl: ''
+  logoUrl: '',
+  lemburMinHours: 5
 };
 
 function readBrandRaw_() {
@@ -23,6 +24,7 @@ function readBrandRaw_() {
     if (raw) {
       const o = JSON.parse(raw);
       Object.keys(BRAND_DEFAULTS_).forEach(k => {
+        if (k === 'lemburMinHours') { const n = Number(o[k]); if (isFinite(n) && n >= 1 && n <= 12) out[k] = n; return; }
         if (typeof o[k] === 'string' && (o[k].trim() !== '' || k === 'logoUrl' || k === 'departmentName')) out[k] = o[k];
       });
     }
@@ -61,11 +63,22 @@ function saveBrandConfig(config, token) {
   const data = {
     appName: appName, appShort: appShort, companyName: companyName,
     departmentName: cleanBrandField_(config.departmentName, 60),
-    logoUrl: logoUrl
+    logoUrl: logoUrl,
+    lemburMinHours: BRAND_DEFAULTS_.lemburMinHours
   };
+  if (config.lemburMinHours !== undefined && config.lemburMinHours !== '') {
+    const jam = Number(config.lemburMinHours);
+    if (!isFinite(jam) || jam < 1 || jam > 12) throw new Error('Batas lembur harus angka antara 1 dan 12 jam.');
+    data.lemburMinHours = jam;
+  }
   PropertiesService.getScriptProperties().setProperty(BRAND_PROP_KEY_, JSON.stringify(data));
   catatAuditLog_(session, 'Ubah Pengaturan Perusahaan', 'Pengaturan', companyName, appName + ' / ' + data.departmentName);
   return getBrandConfig_();
+}
+
+/** Batas minimal selisih jam kerja agar dihitung lembur (Realisasi 2). Bisa diatur di Setting > Perusahaan. */
+function getLemburMinHours_() {
+  return readBrandRaw_().lemburMinHours;
 }
 
 /** Escape HTML sederhana untuk dipakai di template email/laporan. */
