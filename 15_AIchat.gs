@@ -363,10 +363,12 @@ function buildAIArchiveContext_(hit, withShift) {
 function buildAIDataContext_(message) {
   // Pertanyaan tentang bulan yang sudah diarsipkan -> baca arsip bulan itu saja (satu bulan per pertanyaan).
   const withShiftQ = AI_SHIFT_QUESTION_RE_.test(String(message || ''));
-  try {
-    const hit = detectArchivePeriodForQuestion_(message);
-    if (hit) return buildAIArchiveContext_(hit, withShiftQ);
-  } catch (e) { /* gagal baca arsip -> jatuh ke periode aktif */ }
+  let hit = null;
+  try { hit = detectArchivePeriodForQuestion_(message); } catch (e) { hit = null; /* gagal deteksi -> periode aktif */ }
+  if (hit) {
+    try { return buildAIArchiveContext_(hit, withShiftQ); }
+    catch (e) { throw new Error('Arsip "' + hit.period + '" ditemukan tetapi gagal dibaca: ' + e.message); }
+  }
 
   // Konteks dipakai ulang 45 dtk: pertanyaan beruntun tidak membaca ulang seluruh sheet.
   // Dua varian cache: dengan dan tanpa data shift (data shift hanya untuk pertanyaan soal shift).
