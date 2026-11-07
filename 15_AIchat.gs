@@ -269,7 +269,105 @@ function buildAIShiftContext_(data, todayDay) {
 /** Pertanyaan yang menyangkut shift/personil jaga? Hanya itu yang perlu data shift (menjaga konteks tetap kecil & cepat). */
 const AI_SHIFT_QUESTION_RE_ = /shift|pagi|siang|malam|midle|middle|weekend|personil|personel|jaga|giliran|\b(md1?|s1|wd)\b/i;
 
+/**
+ * Deteksi pertanyaan tentang periode ARSIP ("Oktober 2026", "bulan lalu"). Mengembalikan
+ * { key, period, multi } bila cocok dengan satu arsip, selain itu null (pakai periode aktif).
+ * Murah: hanya membaca indeks arsip + satu sel periode aktif, dan hanya jika ada nama bulan di pertanyaan.
+ */
+function detectArchivePeriodForQuestion_(message) {
+  const text = String(message || '').toUpperCase();
+  const wantsLast = /BULAN\s+LALU|BULAN\s+KEMARIN|BULAN\s+SEBELUMNYA/.test(text);
+  const found = []; // {m, y}
+  INDONESIAN_MONTH_NAMES_UPPER_.forEach((name, m) => {
+    let from = 0, at;
+    while ((at = text.indexOf(name, from)) >= 0) {
+      const before = at > 0 ? text.charAt(at - 1) : ' ';
+      const nextCh = text.charAt(at + name.length) || ' ';
+      if (/[A-Z]/.test(before) || /[A-Z]/.test(nextCh)) { from = at + name.length; continue; } // bukan kata utuh
+      const after = text.slice(at + name.length, at + name.length + 8);
+      const ym = after.match(/^\s*(20\d{2})/);
+      found.push({ pos: at, m: m, y: ym ? Number(ym[1]) : null });
+      from = at + name.length;
+    }
+  });
+  if (!found.length && !wantsLast) return null;
+  found.sort((a, b) => a.pos - b.pos);
+
+  const years = text.match(/\b20\d{2}\b/g) || [];
+  const onlyYear = years.length && years.every(y => y === years[0]) ? Number(years[0]) : null;
+
+  const activeText = String(getSheet_(CONFIG.SHEET_JADWAL).getRange(2, 1).getValue() || '').trim();
+  const active = parsePeriodMonthYear_(activeText);
+
+  let target;
+  if (found.length) {
+    target = { m: found[0].m, y: found[0].y || onlyYear };
+  } else {
+    if (!active) return null;
+    const idx = active.year * 12 + active.monthIndex - 1;
+    target = { m: ((idx % 12) + 12) % 12, y: Math.floor(idx / 12) };
+  }
+  // Bulan yang ditanya = periode aktif -> pakai data aktif.
+  if (active && target.m === active.monthIndex && (target.y === null || target.y === active.year)) return null;
+
+  const periods = getArchivedPeriodsInternal_(); // terbaru lebih dulu
+  for (let i = 0; i < periods.length; i++) {
+    const my = parsePeriodMonthYear_(periods[i].period);
+    if (my && my.monthIndex === target.m && (target.y === null || my.year === target.y)) {
+      const distinct = {};
+      found.forEach(f => { distinct[f.m + '-' + (f.y || '')] = 1; });
+      return { key: periods[i].key, period: periods[i].period, multi: Object.keys(distinct).length > 1 };
+    }
+  }
+  return null;
+}
+
+/** Konteks untuk periode arsip (satu bulan). Arsip tidak berubah, jadi cache lebih lama. */
+function buildAIArchiveContext_(hit, withShift) {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'ai_ctx_arsip_' + hit.key + (withShift ? '_shift' : '');
+  const cached = cache.get(cacheKey);
+  let ctx = null;
+  if (cached) { try { ctx = JSON.parse(cached); } catch (e) { ctx = null; } }
+  if (!ctx) {
+    const data = getArchivedDataInternal_(hit.key);
+    const daily = buildAIDailyContext_(data);
+    ctx = {
+      period: data.period,
+      sumber: 'arsip',
+      dayCount: data.dayCount,
+      tanggalHariIni: Utilities.formatDate(new Date(), 'Asia/Jakarta', 'yyyy-MM-dd'),
+      nomorHariIni: null,
+      dashboard: data.dashboard,
+      harian: daily.harian,
+      perKaryawan: daily.perKaryawan,
+      adaDataJamScan: false,
+      rekap: (data.rekap || []).map(r => ({
+        nama: r.nama, jabatan: r.jabatan, hadir: r.hadir, alfa: r.alfa,
+        izin: r.izin, sakit: r.sakit, cuti: r.cuti, off: r.off,
+        persenKehadiran: r.persenKehadiran, totalJamKerja: r.totalJamKerja,
+        kekuranganJam: r.kekuranganJam
+      }))
+    };
+    if (withShift) {
+      const shift = buildAIShiftContext_(data, null);
+      ctx.kodeShift = shift.kodeShift;
+      ctx.jumlahPerShift = shift.jumlahPerShift;
+    }
+    try { cache.put(cacheKey, JSON.stringify(ctx), 1800); } catch (e) { /* >100KB: lewati cache */ }
+  }
+  if (hit.multi) ctx.catatan = 'User menyebut lebih dari satu bulan, tetapi data yang tersedia hanya periode ' + ctx.period + '. Jawab untuk periode ini dan sarankan bertanya per bulan untuk bulan lainnya.';
+  return ctx;
+}
+
 function buildAIDataContext_(message) {
+  // Pertanyaan tentang bulan yang sudah diarsipkan -> baca arsip bulan itu saja (satu bulan per pertanyaan).
+  const withShiftQ = AI_SHIFT_QUESTION_RE_.test(String(message || ''));
+  try {
+    const hit = detectArchivePeriodForQuestion_(message);
+    if (hit) return buildAIArchiveContext_(hit, withShiftQ);
+  } catch (e) { /* gagal baca arsip -> jatuh ke periode aktif */ }
+
   // Konteks dipakai ulang 45 dtk: pertanyaan beruntun tidak membaca ulang seluruh sheet.
   // Dua varian cache: dengan dan tanpa data shift (data shift hanya untuk pertanyaan soal shift).
   const withShift = AI_SHIFT_QUESTION_RE_.test(String(message || ''));
@@ -368,6 +466,9 @@ function chatWithAI(pesan, token) {
     '"Tidak masuk" berarti alfa + izin + sakit + cuti; "off" adalah libur terjadwal, sebutkan terpisah dan jangan dihitung tidak masuk. ' +
     '"belumDiisi" = dijadwalkan masuk tetapi realisasi masih kosong; untuk tanggal setelah tanggalHariIni artinya belum terjadi, bukan tidak masuk. ' +
     'Untuk pertanyaan per tanggal atau per orang, sebutkan SEMUA nama/tanggal yang relevan beserta jumlahnya dan jangan dipotong. ' +
+    'Jika data konteks berisi "sumber":"arsip", itu periode yang sudah diarsipkan: sebutkan nama periodenya di jawaban; ' +
+    'data jam scan tidak tersedia untuk arsip (jangan menjawab soal keterlambatan, katakan datanya tidak ada), dan jangan memakai tanggalHariIni. ' +
+    'Jika ada "catatan" di konteks, sampaikan pada jawaban. ' +
     'Jika tanggal yang ditanya tidak ada di data periode ini, katakan terus terang. ' +
     'Isi "teks" dengan teks biasa (tanpa markdown); untuk daftar gunakan baris baru dengan penomoran "1. Nama".';
 
