@@ -53,6 +53,9 @@
   rejectPersetujuanJadwal: ['id', 'catatan', 'token'],
   batalkanPersetujuanJadwal: ['id', 'token'],
   uploadJadwal: ['base64Data', 'filename', 'token'],
+  uploadJadwalDraf: ['base64Data', 'filename', 'bulanKey', 'token'],
+  getJadwalDrafList: ['token'],
+  hapusJadwalDraf: ['bulanKey', 'token'],
   uploadRealisasi: ['base64Data', 'filename', 'token'],
   uploadFingerAbsen: ['base64Data', 'filename', 'token'],
   downloadJadwalTemplate: ['token', 'department'],
@@ -671,7 +674,8 @@ function onDepartmentFilterChange() {
     'Ini akan OTOMATIS:\n' +
     '1) Mengarsipkan data "' + periodLabel + '" (aman, tersimpan di arsip)\n' +
     '2) Mengosongkan Jadwal & Realisasi untuk bulan berikutnya\n\n' +
-    'Setelah ini, Anda tetap perlu mengisi/upload Jadwal shift untuk bulan baru. Lanjutkan?'
+    (DRAF_LIST_.some(d => d.aktifBerikutnya) ? '3) Menerapkan DRAF jadwal bulan berikutnya yang sudah diunggah\n\n' : '\nSetelah ini, Anda tetap perlu mengisi/upload Jadwal shift untuk bulan baru.\n\n') +
+    'Lanjutkan?'
   );
   if (!confirmed) return;
 
@@ -687,7 +691,14 @@ function onDepartmentFilterChange() {
       loadArchivedPeriodsList();
       const info = data.mulaiPeriodeBaruInfo;
       if (info) {
-        toast('Periode "' + info.periodeLama + '" diarsipkan. Periode aktif sekarang: "' + info.periodeBaru + '" (' + info.jumlahHari + ' hari). Silakan upload Jadwal shift baru.');
+        const d = info.drafDiterapkan;
+        if (d) {
+          toast('Periode "' + info.periodeLama + '" diarsipkan. Periode aktif: "' + info.periodeBaru + '". Draf jadwal diterapkan: ' + d.matched + ' karyawan.' +
+            (d.notFound && d.notFound.length ? ' Tidak ditemukan: ' + d.notFound.join(', ') : '') + (d.error ? ' (Ada kendala: ' + d.error + ')' : ''), !!(d.error || (d.notFound && d.notFound.length)));
+        } else {
+          toast('Periode "' + info.periodeLama + '" diarsipkan. Periode aktif sekarang: "' + info.periodeBaru + '" (' + info.jumlahHari + ' hari). Silakan upload Jadwal shift baru.');
+        }
+        loadJadwalDraf_();
       }
     })
     .withFailureHandler(err => {
@@ -816,6 +827,7 @@ function onDepartmentFilterChange() {
         STATE = data;
         renderAll();
         loadArchivedPeriodsList();
+        loadJadwalDraf_();
         startPolling();
         startPengajuanBadgePolling_();
         startNotifPolling_();
@@ -2632,6 +2644,84 @@ function submitDeleteEmployee() {
       toast('Gagal membaca file dari komputer Anda.', true);
     };
     reader.readAsDataURL(file);
+  }
+
+  /* ============ DRAF JADWAL BULAN DEPAN ============ */
+  var DRAF_LIST_ = [];
+
+  function canManageDraf_() {
+    return !!SESSION && (SESSION.role === 'Super Admin' || String(SESSION.role || '').trim().toLowerCase() === 'admin');
+  }
+
+  function renderDrafPanel_(res) {
+    const panel = document.getElementById('drafPanel');
+    if (!panel) return;
+    if (!canManageDraf_()) { panel.classList.add('hidden'); return; }
+    panel.classList.remove('hidden');
+    DRAF_LIST_ = (res.draf || []).map(d => Object.assign({}, d, { aktifBerikutnya: d.key === (res.bulanTujuan && res.bulanTujuan[0] ? res.bulanTujuan[0].key : '') }));
+    const sel = document.getElementById('drafBulanSelect');
+    const keep = sel.value;
+    sel.innerHTML = '';
+    (res.bulanTujuan || []).forEach(o => { const op = document.createElement('option'); op.value = o.key; op.textContent = o.label; sel.appendChild(op); });
+    if (keep) sel.value = keep;
+    const list = document.getElementById('drafList');
+    list.innerHTML = '';
+    if (!DRAF_LIST_.length) { list.textContent = 'Belum ada draf jadwal.'; return; }
+    DRAF_LIST_.forEach(d => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:8px;align-items:center;margin:2px 0;';
+      const t = document.createElement('span');
+      t.textContent = '• ' + d.label + ': ' + d.jumlahKaryawan + ' karyawan (diunggah ' + (d.diunggahOleh || '-') + ', ' + (d.waktu || '-') + ')';
+      const b = document.createElement('button');
+      b.className = 'btn'; b.textContent = 'Hapus';
+      b.onclick = () => hapusDraf_(d.key, d.label);
+      row.appendChild(t); row.appendChild(b); list.appendChild(row);
+    });
+  }
+
+  function loadJadwalDraf_() {
+    if (!SESSION || !canManageDraf_()) return;
+    google.script.run.withSuccessHandler(renderDrafPanel_).withFailureHandler(() => {}).getJadwalDrafList(SESSION.token);
+  }
+
+  function triggerDrafUpload() {
+    if (!canManageDraf_()) { toast('Hanya admin yang boleh upload jadwal bulan depan', true); return; }
+    if (!document.getElementById('drafBulanSelect').value) { toast('Pilih bulan tujuan dulu', true); return; }
+    document.getElementById('drafFileInput').click();
+  }
+
+  function handleDrafFileSelected(evt) {
+    const file = evt.target.files[0];
+    if (!file) return;
+    evt.target.value = '';
+    if (!SESSION) { toast('Sesi login habis, silakan login ulang', true); showLoginGate(); return; }
+    if (!/\.xlsx$/i.test(file.name)) { toast('File harus berformat .xlsx', true); return; }
+    const bulanKey = document.getElementById('drafBulanSelect').value;
+    const btn = document.getElementById('drafUploadBtn');
+    btn.disabled = true; btn.textContent = '⏳ Memproses...';
+    const reader = new FileReader();
+    reader.onload = () => {
+      google.script.run
+        .withSuccessHandler(res => {
+          btn.disabled = false; btn.textContent = 'Upload Draf';
+          renderDrafPanel_(res);
+          let msg = 'Draf ' + res.bulan + ' tersimpan: ' + res.matched + ' karyawan cocok.';
+          if (res.notFound && res.notFound.length) msg += ' Tidak ditemukan: ' + res.notFound.join(', ') + '.';
+          if (res.invalidCodes && res.invalidCodes.length) msg += ' Kode tidak valid dikosongkan: ' + res.invalidCodes.length + ' sel.';
+          toast(msg, !!((res.notFound && res.notFound.length) || (res.invalidCodes && res.invalidCodes.length)));
+        })
+        .withFailureHandler(err => { btn.disabled = false; btn.textContent = 'Upload Draf'; toast('Gagal upload draf: ' + err.message, true); })
+        .uploadJadwalDraf(reader.result.split(',')[1], file.name, bulanKey, SESSION.token);
+    };
+    reader.onerror = () => { btn.disabled = false; btn.textContent = 'Upload Draf'; toast('Gagal membaca file dari komputer Anda.', true); };
+    reader.readAsDataURL(file);
+  }
+
+  function hapusDraf_(key, label) {
+    if (!confirm('Hapus draf jadwal ' + label + '?')) return;
+    google.script.run.withSuccessHandler(res => { renderDrafPanel_(res); toast('Draf ' + label + ' dihapus'); })
+      .withFailureHandler(err => toast('Gagal menghapus draf: ' + err.message, true))
+      .hapusJadwalDraf(key, SESSION.token);
   }
 
   /* ============ UPLOAD REALISASI (EXCEL) ============ */

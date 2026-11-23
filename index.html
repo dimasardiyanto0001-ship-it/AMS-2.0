@@ -317,6 +317,16 @@
             <button class="btn btn-pdf" onclick="downloadPdf('Jadwal')">⬇ Download PDF</button>
           </div>
         </div>
+        <div id="drafPanel" class="draf-panel hidden" style="margin:10px 0;padding:10px 12px;border:1px dashed #94a3b8;border-radius:8px;">
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+            <strong>📅 Jadwal bulan depan</strong>
+            <select id="drafBulanSelect"></select>
+            <input type="file" id="drafFileInput" accept=".xlsx" style="display:none" onchange="handleDrafFileSelected(event)">
+            <button class="btn btn-upload" id="drafUploadBtn" onclick="triggerDrafUpload()">Upload Draf</button>
+            <span class="muted" style="font-size:12px;">Disimpan sebagai draf, terisi otomatis saat Mulai Periode Baru. Format file sama dengan template Jadwal.</span>
+          </div>
+          <div id="drafList" style="margin-top:8px;font-size:13px;"></div>
+        </div>
         <div class="legend" id="legendJadwal"></div>
         <p class="muted" id="uploadHint">Klik sel (boleh lebih dari satu; Shift+klik untuk rentang di baris yang sama), pilih shift, lalu tekan Simpan Batch (khusus admin). Atau download template Excel kosong, isi manual, lalu upload lagi. Karyawan dicocokkan berdasarkan nama.</p>
         <div id="jadwalWrap" class="table-wrap grid-wrap"></div>
