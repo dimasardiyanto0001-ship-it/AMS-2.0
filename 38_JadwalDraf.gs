@@ -86,6 +86,51 @@ function getJadwalDrafList(token) {
   return { draf: listDrafInternal_(), bulanTujuan: getDrafMonthOptions_() };
 }
 
+/** Isi draf satu bulan untuk pratinjau: grid per karyawan, ringkasan per shift, dan karyawan yang belum ada di draf. */
+function getJadwalDrafDetail(bulanKey, token) {
+  verifySession_(token);
+  const t = parseDrafBulanKey_(bulanKey);
+  const sh = getDrafSheet_(false);
+  const rows = (sh && sh.getLastRow() >= 2)
+    ? sh.getRange(2, 1, sh.getLastRow() - 1, DRAF_COL_WAKTU_).getValues().filter(r => String(r[0]).trim() === t.key)
+    : [];
+  if (!rows.length) throw new Error('Draf untuk ' + t.label + ' tidak ditemukan.');
+
+  const jadwal = getSheet_(CONFIG.SHEET_JADWAL);
+  const numRows = getLastEmployeeRow_(jadwal) - CONFIG.DATA_START_ROW + 1;
+  const emp = numRows > 0 ? jadwal.getRange(CONFIG.DATA_START_ROW, 2, numRows, 2).getValues() : [];
+  const jabatanByName = {};
+  emp.forEach(e => { if (String(e[0]).trim()) jabatanByName[nameKey_(e[0])] = String(e[1] || ''); });
+
+  const dayNames = [];
+  for (let d = 1; d <= t.dayCount; d++) dayNames.push(INDONESIAN_DAY_ABBR_[new Date(t.year, t.monthIndex, d).getDay()]);
+
+  const ringkasan = {};      // kode -> [jumlah per hari]
+  const inDraf = {};
+  const employees = rows.map((r, i) => {
+    const nama = String(r[1] || '').trim();
+    inDraf[nameKey_(nama)] = true;
+    const days = [];
+    for (let d = 0; d < t.dayCount; d++) {
+      const kode = String(r[DRAF_COL_DAY1_ - 1 + d] || '').trim().toUpperCase();
+      days.push(kode);
+      if (kode) { (ringkasan[kode] = ringkasan[kode] || new Array(t.dayCount).fill(0))[d]++; }
+    }
+    return { rowIndex: i, nama: nama, jabatan: jabatanByName[nameKey_(nama)] || '', days: days };
+  });
+  const tidakAdaDiDraf = emp.map(e => String(e[0]).trim()).filter(n => n && !inDraf[nameKey_(n)]);
+
+  const meta = rows[0];
+  const w = meta[DRAF_COL_WAKTU_ - 1];
+  return {
+    key: t.key, label: t.label, dayCount: t.dayCount, dayNames: dayNames,
+    employees: employees, ringkasan: ringkasan, tidakAdaDiDraf: tidakAdaDiDraf,
+    diunggahOleh: rows.map(r => String(r[DRAF_COL_UPLOADER_ - 1] || '').trim()).filter((u, i, arr) => u && arr.indexOf(u) === i).join(', '),
+    waktu: w instanceof Date ? Utilities.formatDate(w, 'Asia/Jakarta', 'dd/MM/yyyy HH:mm') : String(w || ''),
+    shiftCodes: getShiftCodesDynamic_()
+  };
+}
+
 function hapusJadwalDraf(bulanKey, token) {
   const session = requireUploadAccess_(token, 'Hanya Super Admin atau Admin yang boleh menghapus draf jadwal.');
   const t = parseDrafBulanKey_(bulanKey);
