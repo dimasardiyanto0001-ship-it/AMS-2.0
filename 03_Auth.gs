@@ -78,6 +78,9 @@ function ensureUsersSheetColumns_(sheet) {
   if (sheet.getRange(1, USERS_COL.SALT).getValue() !== 'Salt') {
     sheet.getRange(1, USERS_COL.SALT).setValue('Salt').setFontWeight('bold');
   }
+  if (sheet.getRange(1, USERS_COL.DEPARTMENT).getValue() !== 'Departemen') {
+    sheet.getRange(1, USERS_COL.DEPARTMENT).setValue('Departemen').setFontWeight('bold');
+  }
   if (sheet.getRange(1, USERS_COL.STATUS).getValue() !== 'Status') {
     sheet.getRange(1, USERS_COL.STATUS).setValue('Status').setFontWeight('bold');
     const lastRow = sheet.getLastRow();
@@ -181,6 +184,7 @@ function login(username, password) {
     nama: row[USERS_COL.NAMA - 1],
     role: resolveRoleName_(row[USERS_COL.ROLE - 1])
   };
+  session.department = resolveScopeDept_(session);   // '' = tidak dibatasi (Super Admin / akun tanpa departemen)
   CacheService.getScriptCache().put('session_' + token, JSON.stringify(session), CONFIG.SESSION_DURATION_SEC);
   return Object.assign({ token }, session);
 }
@@ -194,7 +198,11 @@ function verifySession_(token) {
   if (!token) throw new Error('Anda harus login terlebih dahulu untuk mengubah data.');
   const raw = CacheService.getScriptCache().get('session_' + token);
   if (!raw) throw new Error('Sesi login sudah habis (maks 6 jam). Silakan login ulang.');
-  return JSON.parse(raw);
+  const session = JSON.parse(raw);
+  // Pembatasan departemen berlaku untuk SELURUH request ini (data, upload, draf, export, dst).
+  session.department = resolveScopeDept_(session);
+  CURRENT_SCOPE_DEPT_ = session.department;
+  return session;
 }
 
 /** Alias lama yang masih dipakai banyak modul. */

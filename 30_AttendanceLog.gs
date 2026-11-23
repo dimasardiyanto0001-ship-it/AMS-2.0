@@ -139,6 +139,10 @@ function generateAttendanceLogExcel(periodKey, employeeName, dayStart, dayEnd, t
 
   const oneEmployee = employeeName && employeeName !== 'ALL';
   let employees = realisasi.employees;
+  if (CURRENT_SCOPE_DEPT_) {
+    const mScope = getKaryawanMasterMap_();
+    employees = employees.filter(e => nameInScope_(e.nama, mScope));   // akun per-departemen
+  }
   if (oneEmployee) {
     employees = employees.filter(e => nameKey_(e.nama) === nameKey_(employeeName));
     if (!employees.length) throw new Error('Karyawan "' + employeeName + '" tidak ditemukan di periode ini.');

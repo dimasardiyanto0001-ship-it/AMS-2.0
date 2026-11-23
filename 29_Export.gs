@@ -352,8 +352,18 @@ function deptSuffixOf_(department) {
   return (d && d !== 'ALL') ? '_' + d.replace(/[^\w]+/g, '') : '';
 }
 
+/** Akun per-departemen: hanya Jadwal/Realisasi, dan selalu terfilter ke departemennya. */
+function scopeExportDepartment_(sheetName, department) {
+  if (!CURRENT_SCOPE_DEPT_) return department;
+  if (['Jadwal', 'Realisasi'].indexOf(sheetName) === -1) {
+    throw new Error('Export "' + sheetName + '" belum tersedia untuk akun per-departemen. Gunakan Jadwal atau Realisasi.');
+  }
+  return CURRENT_SCOPE_DEPT_;
+}
+
 function exportSheetPdf(sheetName, token, department, periodKey) {
   requireExportAccess_(token);
+  department = scopeExportDepartment_(sheetName, department);
   const isArchive = periodKey && periodKey !== 'active';
   const dateStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || REPORT_TIME_ZONE_, 'yyyyMMdd_HHmm');
   if (isArchive) {
@@ -382,6 +392,7 @@ function exportSheetPdf(sheetName, token, department, periodKey) {
  */
 function exportSheetExcel(sheetName, token, department, periodKey) {
   requireExportAccess_(token);
+  department = scopeExportDepartment_(sheetName, department);
   if (['Jadwal', 'Realisasi'].indexOf(sheetName) === -1) throw new Error('Export Excel hanya untuk Jadwal atau Realisasi.');
   const dateStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || REPORT_TIME_ZONE_, 'yyyyMMdd_HHmm');
   const isArchive = periodKey && periodKey !== 'active';

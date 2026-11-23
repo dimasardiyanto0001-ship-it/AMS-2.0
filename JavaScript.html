@@ -26,7 +26,9 @@
   logout: ['token'],
   changeOwnPassword: ['oldPassword', 'newPassword', 'token'],
   getUsersList: ['token'],
-  addUserWeb: ['nama', 'username', 'password', 'role', 'token'],
+  addUserWeb: ['nama', 'username', 'password', 'role', 'token', 'department'],
+  setUserDepartment: ['username', 'department', 'token'],
+  getDepartmentOptions: ['token'],
   setUserStatus: ['username', 'status', 'token'],
   resetUserPasswordByAdmin: ['username', 'newPassword', 'token'],
   getRolesList: ['token'],
@@ -520,6 +522,15 @@ function populateDepartmentFilterOptions_() {
     (DAFTAR_KARYAWAN_DATA || []).map(k => (k.department || '').trim()).filter(Boolean)
   )).sort();
   const prevValue = sel.value || currentDeptFilter;
+  if (SESSION && SESSION.department) {
+    // Akun per-departemen: filter dikunci ke departemennya.
+    sel.innerHTML = `<option value="${escapeHtml(SESSION.department)}">${escapeHtml(SESSION.department)}</option>`;
+    sel.value = SESSION.department;
+    sel.disabled = true;
+    currentDeptFilter = SESSION.department;
+    return;
+  }
+  sel.disabled = false;
   sel.innerHTML = '<option value="ALL">Semua Department</option>' +
     depts.map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('');
   sel.value = selectHasOption_(sel, prevValue) ? prevValue : 'ALL';
@@ -812,7 +823,7 @@ function onDepartmentFilterChange() {
     if (SESSION) {
       el.innerHTML = `
       <span class="user-badge">
-        👤 ${escapeHtml(SESSION.nama)} <span class="role-tag">${escapeHtml(SESSION.role)}</span>
+        👤 ${escapeHtml(SESSION.nama)} <span class="role-tag">${escapeHtml(SESSION.role)}${SESSION.department ? ' · ' + escapeHtml(SESSION.department) : ''}</span>
       </span>
       <button class="btn btn-ghost" onclick="openChangePasswordPicker()">🔑 Ganti Password</button>
       <button class="btn btn-logout" onclick="doLogout()">Logout</button>`;
@@ -2625,8 +2636,9 @@ function submitDeleteEmployee() {
                 ? 'Jadwal diajukan ke HOD (' + data.persetujuanJadwal.jumlahSel + ' sel, ' + info.matched + ' karyawan cocok). Jadwal berubah setelah disetujui.'
                 : 'Tidak ada perubahan: isi file sama dengan Jadwal saat ini.')
             : 'Jadwal terupdate: ' + info.matched + ' karyawan cocok.';
-          if (info.notFound && info.notFound.length) {
-            msg += ' Tidak ditemukan: ' + info.notFound.join(', ');
+          if (info.bukanDepartemen && info.bukanDepartemen.length) msg += ' Diabaikan (bukan departemen Anda): ' + info.bukanDepartemen.length + ' karyawan.';
+          if ((info.notFound && info.notFound.length) || (info.bukanDepartemen && info.bukanDepartemen.length)) {
+            if (info.notFound && info.notFound.length) msg += ' Tidak ditemukan: ' + info.notFound.join(', ');
             toast(msg, true);
           } else {
             toast(msg);
@@ -2808,7 +2820,8 @@ function submitDeleteEmployee() {
           let msg = 'Draf ' + res.bulan + ' tersimpan: ' + res.matched + ' karyawan cocok.';
           if (res.notFound && res.notFound.length) msg += ' Tidak ditemukan: ' + res.notFound.join(', ') + '.';
           if (res.invalidCodes && res.invalidCodes.length) msg += ' Kode tidak valid dikosongkan: ' + res.invalidCodes.length + ' sel.';
-          toast(msg, !!((res.notFound && res.notFound.length) || (res.invalidCodes && res.invalidCodes.length)));
+          if (res.bukanDepartemen && res.bukanDepartemen.length) msg += ' Diabaikan (bukan departemen Anda): ' + res.bukanDepartemen.length + ' karyawan.';
+          toast(msg, !!((res.notFound && res.notFound.length) || (res.invalidCodes && res.invalidCodes.length) || (res.bukanDepartemen && res.bukanDepartemen.length)));
           bukaPratinjauDraf_(bulanKey); // langsung tampilkan hasil unggahan untuk diperiksa
         })
         .withFailureHandler(err => { btn.disabled = false; btn.textContent = 'Upload Jadwal'; toast('Gagal upload draf: ' + err.message, true); })
@@ -2873,8 +2886,9 @@ function submitDeleteEmployee() {
           applyStateAndRerender_(data);
           const info = data.uploadInfo || { matched: 0, notFound: [] };
           let msg = 'Realisasi terupdate: ' + info.matched + ' karyawan cocok.';
-          if (info.notFound && info.notFound.length) {
-            msg += ' Tidak ditemukan: ' + info.notFound.join(', ');
+          if (info.bukanDepartemen && info.bukanDepartemen.length) msg += ' Diabaikan (bukan departemen Anda): ' + info.bukanDepartemen.length + ' karyawan.';
+          if ((info.notFound && info.notFound.length) || (info.bukanDepartemen && info.bukanDepartemen.length)) {
+            if (info.notFound && info.notFound.length) msg += ' Tidak ditemukan: ' + info.notFound.join(', ');
             toast(msg, true);
           } else {
             toast(msg);
@@ -3834,11 +3848,35 @@ function sendAIChatMessage() {
       .withSuccessHandler(list => { USERS_LIST_DATA = list || []; renderUsersTable(); })
       .withFailureHandler(err => toast('Gagal memuat daftar user: ' + err.message, true))
       .getUsersList(SESSION.token);
+    google.script.run
+      .withSuccessHandler(opts => { DEPT_OPTIONS_ = opts || []; renderUsersTable(); })
+      .withFailureHandler(() => {})
+      .getDepartmentOptions(SESSION.token);
+  }
+
+  var DEPT_OPTIONS_ = [];
+
+  /** Sel Departemen di tabel akun: Super Admin bisa memilih (kecuali akun Super Admin), lainnya hanya melihat. */
+  function deptCellHtml_(u, canEdit) {
+    const isSA = u.role === 'Super Admin';
+    if (isSA) return '<span class="muted">Semua</span>';
+    if (!canEdit) return escapeHtml(u.department || 'Semua');
+    const opts = ['<option value="">(Semua departemen)</option>']
+      .concat(DEPT_OPTIONS_.map(d => `<option value="${escapeHtml(d)}"${d === u.department ? ' selected' : ''}>${escapeHtml(d)}</option>`));
+    return `<select onchange='changeUserDepartment(${JSON.stringify(u.username)}, this.value)'>${opts.join('')}</select>`;
+  }
+
+  function changeUserDepartment(username, dept) {
+    if (!SESSION) return;
+    google.script.run
+      .withSuccessHandler(list => { USERS_LIST_DATA = list || []; renderUsersTable(); toast('Departemen akun "' + username + '" diperbarui' + (dept ? ': ' + dept : ' (semua departemen)')); })
+      .withFailureHandler(err => { toast('Gagal mengubah departemen: ' + err.message, true); loadUsersList(); })
+      .setUserDepartment(username, dept, SESSION.token);
   }
 
   function renderUsersTable() {
     const canEdit = !!SESSION && SESSION.role === 'Super Admin';
-    const cols = ['Username', 'Nama', 'Role', 'Status'];
+    const cols = ['Username', 'Nama', 'Role', 'Departemen', 'Status'];
     let html = '<table><thead><tr>' + cols.map(c => `<th>${c}</th>`).join('') + (canEdit ? '<th>Aksi</th>' : '') + '</tr></thead><tbody>';
     USERS_LIST_DATA.forEach(u => {
       const isNonaktif = u.status === 'Nonaktif';
@@ -3846,6 +3884,7 @@ function sendAIChatMessage() {
         <td>${escapeHtml(u.username)}</td>
         <td class="name-col">${escapeHtml(u.nama)}</td>
         <td>${escapeHtml(u.role)}</td>
+        <td>${deptCellHtml_(u, canEdit)}</td>
         <td>${isNonaktif ? '<span style="color:#dc2626;font-weight:600;">Nonaktif</span>' : '<span style="color:#16a34a;font-weight:600;">Aktif</span>'}</td>
         ${canEdit ? `<td style="white-space:nowrap;">
           <button class="btn btn-ghost" onclick='openResetUserPasswordPicker(${JSON.stringify(u.username)})'>🔑 Reset Password</button>
@@ -3863,6 +3902,9 @@ function sendAIChatMessage() {
   document.getElementById('newUserUsername').value = '';
   document.getElementById('newUserPassword').value = '';
   document.getElementById('addUserError').textContent = '';
+  const dsel = document.getElementById('newUserDept');
+  dsel.innerHTML = '<option value="">Departemen: semua (tidak dibatasi)</option>' +
+    DEPT_OPTIONS_.map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('');
   const sel = document.getElementById('newUserRole');
   sel.innerHTML = '<option value="">Memuat daftar role...</option>';
   google.script.run
@@ -3903,7 +3945,7 @@ function sendAIChatMessage() {
         btn.disabled = false;
         document.getElementById('addUserError').textContent = err.message;
       })
-      .addUserWeb(nama, username, password, role, SESSION.token);
+      .addUserWeb(nama, username, password, role, SESSION.token, document.getElementById('newUserDept').value);
   }
 
   function toggleUserStatus(username, newStatus) {

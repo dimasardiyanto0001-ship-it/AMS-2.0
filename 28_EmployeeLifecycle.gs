@@ -25,6 +25,13 @@ function addEmployee(nama, jabatan, nik, department, email, noHp, token) {
   email = String(email || '').trim();
   noHp = String(noHp || '').replace(/[\s\-().]/g, '');
   if (!nama) throw new Error('Nama karyawan wajib diisi.');
+  if (CURRENT_SCOPE_DEPT_) {
+    // Akun per-departemen hanya boleh menambah karyawan ke departemennya sendiri.
+    if (department && deptKey_(department) !== deptKey_(CURRENT_SCOPE_DEPT_)) {
+      throw new Error('Akses ditolak: Anda hanya boleh menambah karyawan untuk departemen ' + CURRENT_SCOPE_DEPT_ + '.');
+    }
+    department = CURRENT_SCOPE_DEPT_;
+  }
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new Error('Format email tidak valid.');
   }
@@ -224,6 +231,7 @@ function deleteEmployee(nama, token, force) {
   const session = requireUploadAccess_(token, 'Hanya akun dengan role "Super Admin" atau "Admin" yang boleh menghapus karyawan.');
   nama = String(nama || '').trim();
   if (!nama) throw new Error('Nama karyawan tidak boleh kosong.');
+  assertNamesInScope_([nama]);
 
   withScriptLock_(() => {
     const ss = getSpreadsheet_();
@@ -271,6 +279,7 @@ function deleteUnassignedEmployee(namaList, token) {
   const session = requireUploadAccess_(token, 'Hanya akun dengan role "Super Admin" atau "Admin" yang boleh menghapus karyawan.');
   if (!namaList || !namaList.length) throw new Error('Tidak ada karyawan yang dipilih untuk dihapus.');
 
+  assertNamesInScope_(namaList.map(n => String(n || '').trim()));
   const namaSet = new Set(namaList.map(n => nameKey_(n)));
   const deleted = [];
   const skipped = [];

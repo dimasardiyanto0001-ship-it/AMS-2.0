@@ -325,7 +325,7 @@ function detectArchivePeriodForQuestion_(message) {
 /** Konteks untuk periode arsip (satu bulan). Arsip tidak berubah, jadi cache lebih lama. */
 function buildAIArchiveContext_(hit, withShift) {
   const cache = CacheService.getScriptCache();
-  const cacheKey = 'ai_ctx_arsip_' + hit.key + (withShift ? '_shift' : '');
+  const cacheKey = 'ai_ctx_arsip_' + hit.key + (withShift ? '_shift' : '') + aiScopeSuffix_();
   const cached = cache.get(cacheKey);
   let ctx = null;
   if (cached) { try { ctx = JSON.parse(cached); } catch (e) { ctx = null; } }
@@ -360,6 +360,11 @@ function buildAIArchiveContext_(hit, withShift) {
   return ctx;
 }
 
+/** Cache konteks AI dipisah per departemen akun supaya data departemen lain tidak bocor lewat cache. */
+function aiScopeSuffix_() {
+  return CURRENT_SCOPE_DEPT_ ? '_d_' + deptKey_(CURRENT_SCOPE_DEPT_).replace(/[^a-z0-9]+/g, '') : '';
+}
+
 function buildAIDataContext_(message) {
   // Pertanyaan tentang bulan yang sudah diarsipkan -> baca arsip bulan itu saja (satu bulan per pertanyaan).
   const withShiftQ = AI_SHIFT_QUESTION_RE_.test(String(message || ''));
@@ -373,7 +378,7 @@ function buildAIDataContext_(message) {
   // Konteks dipakai ulang 45 dtk: pertanyaan beruntun tidak membaca ulang seluruh sheet.
   // Dua varian cache: dengan dan tanpa data shift (data shift hanya untuk pertanyaan soal shift).
   const withShift = AI_SHIFT_QUESTION_RE_.test(String(message || ''));
-  const cacheKey = AI_CONTEXT_CACHE_KEY_ + (withShift ? '_shift' : '');
+  const cacheKey = AI_CONTEXT_CACHE_KEY_ + (withShift ? '_shift' : '') + aiScopeSuffix_();
   const cache = CacheService.getScriptCache();
   const cached = cache.get(cacheKey);
   if (cached) {

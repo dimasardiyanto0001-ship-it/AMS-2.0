@@ -135,6 +135,7 @@ function getArchivedPeriods(token) {
 }
 
 function getArchivedDataInternal_(periodKey, department) {
+  department = effectiveDept_(department);
   const ss = getSpreadsheet_();
   const found = findArchiveRow_(getArchiveIndexSheet_(), periodKey);
   if (!found) throw new Error('Arsip untuk periode ini tidak ditemukan.');

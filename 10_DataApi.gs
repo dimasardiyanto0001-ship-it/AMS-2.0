@@ -45,7 +45,7 @@ function cellCode_(val) {
 
 function getAllData(token, department) {
   verifySession_(token);
-  return getCachedAllData_(department);
+  return getCachedAllData_(effectiveDept_(department));
 }
 
 function getCachedAllData_(department) {
@@ -74,6 +74,7 @@ function maybeSyncOffFromJadwal_() {
 /* ============================ AGREGASI UTAMA ============================ */
 
 function getAllDataInternal_(skipSync, department) {
+  department = effectiveDept_(department);   // akun per-departemen: selalu terbatas ke departemennya
   if (!skipSync) maybeSyncOffFromJadwal_();
 
   const ss = getSpreadsheet_();

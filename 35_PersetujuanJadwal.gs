@@ -127,6 +127,9 @@ function ajukanPerubahanJadwal_(session, changes, sumber, catatanRingkas) {
   const dayCount = getDayColCount_(jadwalSheet);
   const shiftCodes = getShiftCodesDynamic_();
 
+  // Akun per-departemen hanya boleh mengajukan perubahan untuk karyawan departemennya.
+  assertNamesInScope_((changes || []).map(c => String(c.nama || '').trim()));
+
   const uniq = {};
   (changes || []).forEach(c => {
     const emp = current[nameKey_(c.nama || '')];
