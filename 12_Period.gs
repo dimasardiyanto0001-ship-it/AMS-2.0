@@ -177,13 +177,18 @@ function mulaiPeriodeBaru(token) {
     SpreadsheetApp.flush();
   }, 20000);
 
+  // Draf jadwal bulan ini (diunggah sebelumnya) langsung dipasang ke Jadwal.
+  const draf = terapkanJadwalDrafUntukPeriode_(nextYear, nextMonthIndex, nextDayCount);
+
   const result = getAllDataInternal_();
   result.mulaiPeriodeBaruInfo = {
     periodeLama: currentPeriodText,
     periodeBaru: nextPeriodLabel,
-    jumlahHari: nextDayCount
+    jumlahHari: nextDayCount,
+    drafDiterapkan: draf.ada ? { matched: draf.matched, notFound: draf.notFound, error: draf.error || null } : null
   };
 
-  catatAuditLog_(session, 'Mulai Periode Baru', 'Periode', nextPeriodLabel, 'Dari periode ' + currentPeriodText);
+  catatAuditLog_(session, 'Mulai Periode Baru', 'Periode', nextPeriodLabel, 'Dari periode ' + currentPeriodText +
+    (draf.ada ? '; draf jadwal diterapkan (' + draf.matched + ' karyawan)' : ''));
   return result;
 }
