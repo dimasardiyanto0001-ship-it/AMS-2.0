@@ -67,14 +67,21 @@ function listDrafInternal_() {
   rows.forEach(r => {
     const key = String(r[0] || '').trim();
     if (!key) return;
-    const e = byKey[key] || (byKey[key] = { key: key, jumlahKaryawan: 0, diunggahOleh: '', waktu: '' });
+    const e = byKey[key] || (byKey[key] = { key: key, jumlahKaryawan: 0, diunggahOleh: '', waktu: '', _pengunggah: [], _t: 0 });
     e.jumlahKaryawan++;
-    e.diunggahOleh = String(r[DRAF_COL_UPLOADER_ - 1] || '');
+    const u = String(r[DRAF_COL_UPLOADER_ - 1] || '').trim();
+    if (u && e._pengunggah.indexOf(u) === -1) e._pengunggah.push(u);
     const w = r[DRAF_COL_WAKTU_ - 1];
-    e.waktu = w instanceof Date ? Utilities.formatDate(w, 'Asia/Jakarta', 'dd/MM/yyyy HH:mm') : String(w || '');
+    const tt = w instanceof Date ? w.getTime() : 0;
+    if (tt >= e._t) {
+      e._t = tt;
+      e.waktu = w instanceof Date ? Utilities.formatDate(w, 'Asia/Jakarta', 'dd/MM/yyyy HH:mm') : String(w || '');
+    }
   });
   return Object.keys(byKey).sort().map(k => {
     const e = byKey[k];
+    e.diunggahOleh = e._pengunggah.join(', ');
+    delete e._pengunggah; delete e._t;
     try { e.label = parseDrafBulanKey_(k).label; } catch (err) { e.label = k; }
     return e;
   });
@@ -124,30 +131,49 @@ function uploadJadwalDraf(base64Data, filename, bulanKey, token) {
 
   const sh = getDrafSheet_(true);
   const waktu = new Date();
+  const uploader = session.nama || session.username || '';
+  let diperbarui = 0, baru = 0;
   withScriptLock_(() => {
-    deleteDrafRows_(target.key);                  // unggahan baru menggantikan draf bulan itu
+    // Gabung per karyawan: hanya baris karyawan di file ini yang diganti/ditambah.
+    // Draf departemen/pengunggah lain pada bulan yang sama tidak disentuh.
     const width = DRAF_COL_WAKTU_;
-    const values = info.rows.map(r => {
+    const lastRow = sh.getLastRow();
+    const existing = lastRow >= 2 ? sh.getRange(2, 1, lastRow - 1, width).getValues() : [];
+    const posByName = {};
+    existing.forEach((r, i) => { if (String(r[0]).trim() === target.key) posByName[nameKey_(r[1])] = i; });
+
+    const toAppend = [];
+    info.rows.forEach(r => {
       const line = new Array(width).fill('');
       line[0] = target.key;
       line[1] = r.nama;
       r.days.forEach((c, i) => { line[DRAF_COL_DAY1_ - 1 + i] = c; });
-      line[DRAF_COL_UPLOADER_ - 1] = session.nama || session.username || '';
+      line[DRAF_COL_UPLOADER_ - 1] = uploader;
       line[DRAF_COL_WAKTU_ - 1] = waktu;
-      return line;
+      const pos = posByName[nameKey_(r.nama)];
+      if (pos !== undefined) { existing[pos] = line; diperbarui++; }
+      else { toAppend.push(line); baru++; }
     });
-    const start = Math.max(sh.getLastRow(), 1) + 1;
-    sh.getRange(start, 1, values.length, 1).setNumberFormat('@');
-    sh.getRange(start, 1, values.length, width).setValues(values);
+    if (diperbarui > 0) {
+      sh.getRange(2, 1, existing.length, 1).setNumberFormat('@');
+      sh.getRange(2, 1, existing.length, width).setValues(existing);
+    }
+    if (toAppend.length) {
+      const start = Math.max(sh.getLastRow(), 1) + 1;
+      sh.getRange(start, 1, toAppend.length, 1).setNumberFormat('@');
+      sh.getRange(start, 1, toAppend.length, width).setValues(toAppend);
+    }
     SpreadsheetApp.flush();
   }, 20000);
 
   catatAuditLog_(session, 'Upload Draf Jadwal', SHEET_JADWAL_DRAF_, target.label,
-    filename + ': ' + info.rows.length + ' karyawan cocok, ' + info.notFound.length + ' nama tidak ditemukan, ' + info.invalidCodes.length + ' kode tidak valid');
+    filename + ': ' + info.rows.length + ' karyawan cocok (' + baru + ' baru, ' + diperbarui + ' diperbarui), ' + info.notFound.length + ' nama tidak ditemukan, ' + info.invalidCodes.length + ' kode tidak valid');
 
   return {
     bulan: target.label,
     matched: info.rows.length,
+    baru: baru,
+    diperbarui: diperbarui,
     notFound: info.notFound,
     invalidCodes: info.invalidCodes,
     hariDipotong: info.hariDipotong,
