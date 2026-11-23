@@ -59,10 +59,17 @@ function getDrafMonthOptions_() {
   return out;
 }
 
+/** Baris draf yang boleh dilihat/diubah akun ini (akun per-departemen: hanya karyawan departemennya). */
+function drafRowInScope_(row, master) {
+  return nameInScope_(row[1], master);
+}
+
 function listDrafInternal_() {
   const sh = getDrafSheet_(false);
   if (!sh || sh.getLastRow() < 2) return [];
-  const rows = sh.getRange(2, 1, sh.getLastRow() - 1, DRAF_COL_WAKTU_).getValues();
+  const masterScope = CURRENT_SCOPE_DEPT_ ? getKaryawanMasterMap_() : null;
+  const rows = sh.getRange(2, 1, sh.getLastRow() - 1, DRAF_COL_WAKTU_).getValues()
+    .filter(r => !masterScope || drafRowInScope_(r, masterScope));
   const byKey = {};
   rows.forEach(r => {
     const key = String(r[0] || '').trim();
@@ -101,11 +108,16 @@ function getJadwalDrafDetail(bulanKey, token) {
   const rows = (sh && sh.getLastRow() >= 2)
     ? sh.getRange(2, 1, sh.getLastRow() - 1, DRAF_COL_WAKTU_).getValues().filter(r => String(r[0]).trim() === t.key)
     : [];
+  if (CURRENT_SCOPE_DEPT_) {
+    const m = getKaryawanMasterMap_();
+    for (let i = rows.length - 1; i >= 0; i--) if (!drafRowInScope_(rows[i], m)) rows.splice(i, 1);
+  }
   if (!rows.length) throw new Error('Draf untuk ' + t.label + ' tidak ditemukan.');
 
   const jadwal = getSheet_(CONFIG.SHEET_JADWAL);
   const numRows = getLastEmployeeRow_(jadwal) - CONFIG.DATA_START_ROW + 1;
-  const emp = numRows > 0 ? jadwal.getRange(CONFIG.DATA_START_ROW, 2, numRows, 2).getValues() : [];
+  let emp = numRows > 0 ? jadwal.getRange(CONFIG.DATA_START_ROW, 2, numRows, 2).getValues() : [];
+  if (CURRENT_SCOPE_DEPT_) { const m2 = getKaryawanMasterMap_(); emp = emp.filter(e => nameInScope_(e[0], m2)); }
   const jabatanByName = {};
   emp.forEach(e => { if (String(e[0]).trim()) jabatanByName[nameKey_(e[0])] = String(e[1] || ''); });
 
@@ -149,10 +161,13 @@ function hapusJadwalDraf(bulanKey, token) {
 function deleteDrafRows_(key) {
   const sh = getDrafSheet_(false);
   if (!sh || sh.getLastRow() < 2) return 0;
-  const keys = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues();
+  const keys = sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues();
+  const masterScope = CURRENT_SCOPE_DEPT_ ? getKaryawanMasterMap_() : null;   // akun per-departemen: hanya baris departemennya
   let deleted = 0;
   for (let i = keys.length - 1; i >= 0; i--) { // dari bawah supaya indeks tetap valid
-    if (String(keys[i][0]).trim() === key) { sh.deleteRow(i + 2); deleted++; }
+    if (String(keys[i][0]).trim() !== key) continue;
+    if (masterScope && !nameInScope_(keys[i][1], masterScope)) continue;
+    sh.deleteRow(i + 2); deleted++;
   }
   return deleted;
 }
@@ -168,10 +183,16 @@ function uploadJadwalDraf(base64Data, filename, bulanKey, token) {
 
   const validCodes = getShiftCodesDynamic_();
   const info = withTempSpreadsheet_(base64Data, filename || 'draf_jadwal.xlsx', '_TEMP_DRAF_', MIME_XLSX_, UPLOAD_ERR_XLSX_, fileId => {
-    return buildDrafRows_(readImportedGrid_(fileId, CONFIG.SHEET_JADWAL), validCodes, target.dayCount);
+    const scoped = filterImportedByScope_(readImportedGrid_(fileId, CONFIG.SHEET_JADWAL));
+    const built = buildDrafRows_(scoped.imported, validCodes, target.dayCount);
+    built.bukanDepartemen = scoped.ditolak;
+    return built;
   });
   if (info.rows.length === 0) {
-    throw new Error('Tidak ada karyawan di file yang cocok dengan daftar karyawan. Pastikan nama sama dengan di AMS.');
+    throw new Error(CURRENT_SCOPE_DEPT_
+      ? 'Tidak ada karyawan departemen ' + CURRENT_SCOPE_DEPT_ + ' di file ini yang cocok dengan daftar karyawan.' +
+        (info.bukanDepartemen.length ? ' (' + info.bukanDepartemen.length + ' baris milik departemen lain diabaikan)' : '')
+      : 'Tidak ada karyawan di file yang cocok dengan daftar karyawan. Pastikan nama sama dengan di AMS.');
   }
 
   const sh = getDrafSheet_(true);
@@ -222,6 +243,7 @@ function uploadJadwalDraf(base64Data, filename, bulanKey, token) {
     notFound: info.notFound,
     invalidCodes: info.invalidCodes,
     hariDipotong: info.hariDipotong,
+    bukanDepartemen: info.bukanDepartemen,
     draf: listDrafInternal_(),
     bulanTujuan: getDrafMonthOptions_()
   };

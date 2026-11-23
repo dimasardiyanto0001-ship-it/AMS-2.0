@@ -233,12 +233,13 @@ function getUsersList(token) {
   requireMenuAccess_(token, 'settingaccount');
   const last = sheet.getLastRow();
   if (last < 2) return [];
-  return sheet.getRange(2, 1, last - 1, 6).getValues().map(r => ({
-    username: r[0], nama: r[2], role: resolveRoleName_(r[3]), status: r[5] || 'Aktif'
+  return sheet.getRange(2, 1, last - 1, USERS_COL.DEPARTMENT).getValues().map(r => ({
+    username: r[0], nama: r[2], role: resolveRoleName_(r[3]), status: r[5] || 'Aktif',
+    department: String(r[USERS_COL.DEPARTMENT - 1] || '')
   }));
 }
 
-function addUserWeb(nama, username, password, role, token) {
+function addUserWeb(nama, username, password, role, token, department) {
   getUsersSheet_();
   const session = requireMenuAccess_(token, 'settingaccount');
 
@@ -257,11 +258,20 @@ function addUserWeb(nama, username, password, role, token) {
     const sheet = getUsersSheet_();
     if (findUserRow_(sheet, username)) throw new Error('Username "' + username + '" sudah dipakai.');
     const salt = generateSalt_();
-    sheet.appendRow([username, hashPasswordWithSalt_(password, salt), nama, role, salt, 'Aktif']);
+    // Akun yang dibuat oleh akun per-departemen otomatis ikut departemen pembuatnya.
+    // Super Admin boleh memilih departemen (atau kosong = tidak dibatasi).
+    let dept = '';
+    if (session.department) dept = session.department;
+    else if (department && isSuperAdminRole_(session.role) && !isSuperAdminRole_(role)) {
+      const hit = listDepartmentsInMaster_().filter(d => deptKey_(d) === deptKey_(department))[0];
+      if (!hit) throw new Error('Departemen "' + department + '" tidak ada di Daftar Karyawan.');
+      dept = hit;
+    }
+    sheet.appendRow([username, hashPasswordWithSalt_(password, salt), nama, role, salt, 'Aktif', dept]);
     SpreadsheetApp.flush();
   });
 
-  catatAuditLog_(session, 'Tambah User', 'Akun', username, 'Nama: ' + nama + ', Role: ' + role);
+  catatAuditLog_(session, 'Tambah User', 'Akun', username, 'Nama: ' + nama + ', Role: ' + role + (session.department || department ? ', Departemen: ' + (session.department || department) : ''));
   return getUsersList(token);
 }
 

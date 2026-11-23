@@ -39,8 +39,15 @@ function uploadGridFile_(token, base64Data, filename, opts) {
 
   const stage = !!opts.stageForApproval && !isSuperAdminRole_(session.role);
 
+  let bukanDepartemen = [];
   const applyResult = withTempSpreadsheet_(base64Data, filename, '_TEMP_UPLOAD_', MIME_XLSX_, UPLOAD_ERR_XLSX_, fileId => {
-    const imported = readImportedGrid_(fileId, opts.sheetName);
+    const scoped = filterImportedByScope_(readImportedGrid_(fileId, opts.sheetName));
+    bukanDepartemen = scoped.ditolak;      // akun per-departemen: baris karyawan departemen lain tidak diproses
+    const imported = scoped.imported;
+    if (CURRENT_SCOPE_DEPT_ && imported.info.length === 0) {
+      throw new Error('Tidak ada karyawan departemen ' + CURRENT_SCOPE_DEPT_ + ' di file ini.' +
+        (bukanDepartemen.length ? ' (' + bukanDepartemen.length + ' baris milik departemen lain diabaikan)' : ''));
+    }
     return stage
       ? computeGridImportChanges_(opts.sheetName, imported, opts.validCodes())
       : applyGridImport_(opts.sheetName, imported, opts.validCodes());
@@ -62,7 +69,8 @@ function uploadGridFile_(token, base64Data, filename, opts) {
   result.uploadInfo = {
     matched: applyResult.matched,
     notFound: applyResult.notFound,
-    invalidCodes: applyResult.invalidCodes
+    invalidCodes: applyResult.invalidCodes,
+    bukanDepartemen: bukanDepartemen
   };
   return result;
 }
@@ -178,7 +186,7 @@ function computeGridImportChanges_(targetSheetName, imported, validCodeMap) {
 /** Template Excel jadwal kosong (opsional hanya satu department) untuk diisi lalu diupload. */
 function generateJadwalTemplateExcel(token, department) {
   requireMenuAccess_(token, 'templatejadwal');
-  const deptFilter = String(department || '').trim();
+  const deptFilter = String(effectiveDept_(department) || '').trim();
 
   return withTempSheetCopy_(getSheet_(CONFIG.SHEET_JADWAL), 'Template_Jadwal_Kosong_', 'Jadwal',
     copied => {

@@ -109,6 +109,7 @@ function getNikMap_() {
 function getDaftarKaryawanInternal_() {
   return readEmployeeRows_(getOrCreateNikSheet_(), EMP_NUM_COLS_)
     .filter(r => r[0] && String(r[0]).trim() !== '')
+    .filter(r => !CURRENT_SCOPE_DEPT_ || deptKey_(r[EMP_COL.DEPARTMENT - 1]) === deptKey_(CURRENT_SCOPE_DEPT_))   // akun per-departemen
     .map(r => {
       let tglRegistrasi = r[EMP_COL.TGL_REGISTRASI - 1] || '';
       if (tglRegistrasi instanceof Date) {
@@ -144,6 +145,12 @@ function setEmployeeMasterData(nama, fields, token) {
   nama = String(nama || '').trim();
   if (!nama) throw new Error('Nama karyawan wajib diisi.');
   fields = fields || {};
+  if (CURRENT_SCOPE_DEPT_) {
+    assertNamesInScope_([nama]);
+    if (fields.hasOwnProperty('department') && deptKey_(fields.department) !== deptKey_(CURRENT_SCOPE_DEPT_)) {
+      throw new Error('Akses ditolak: akun Anda tidak boleh memindahkan karyawan ke departemen lain.');
+    }
+  }
 
   withScriptLock_(() => {
     const sheet = getOrCreateNikSheet_();

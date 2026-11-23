@@ -37,7 +37,9 @@ const ROUTES = {
   logout: { fn: 'logout', args: ['token'] },
   changeOwnPassword: { fn: 'changeOwnPassword', args: ['oldPassword', 'newPassword', 'token'] },
   getUsersList: { fn: 'getUsersList', args: ['token'] },
-  addUserWeb: { fn: 'addUserWeb', args: ['nama', 'username', 'password', 'role', 'token'] },
+  addUserWeb: { fn: 'addUserWeb', args: ['nama', 'username', 'password', 'role', 'token', 'department'] },
+  setUserDepartment: { fn: 'setUserDepartment', args: ['username', 'department', 'token'] },
+  getDepartmentOptions: { fn: 'getDepartmentOptions', args: ['token'] },
   setUserStatus: { fn: 'setUserStatus', args: ['username', 'status', 'token'] },
   resetUserPasswordByAdmin: { fn: 'resetUserPasswordByAdmin', args: ['username', 'newPassword', 'token'] },
 

@@ -114,7 +114,10 @@ function applyFingerRowsToRealisasi_(rows) {
 
   const gridRange = sheet => sheet.getRange(CONFIG.DATA_START_ROW, CONFIG.FIRST_DAY_COL, numRows, dayCount);
 
-  const names = realisasiSheet.getRange(CONFIG.DATA_START_ROW, 2, numRows, 1).getValues().map(r => nameKey_(r[0] || ''));
+  const masterScope = CURRENT_SCOPE_DEPT_ ? getKaryawanMasterMap_() : null;
+  // Akun per-departemen: nama di luar departemennya dikosongkan agar tidak bisa dicocokkan/ditulis.
+  const names = realisasiSheet.getRange(CONFIG.DATA_START_ROW, 2, numRows, 1).getValues()
+    .map(r => (masterScope && !nameInScope_(r[0], masterScope)) ? '' : nameKey_(r[0] || ''));
   const currentRealisasi = gridRange(realisasiSheet).getValues();
 
   // NIK yang dipakai lebih dari satu nama dianggap ambigu -> pencocokan jatuh ke nama.

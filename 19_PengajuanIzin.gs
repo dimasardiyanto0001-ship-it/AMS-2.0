@@ -207,6 +207,7 @@ function getPengajuanList(status, token) {
   const filterStatus = (!rawStatus || rawStatus.toUpperCase() === 'ALL' || rawStatus.toUpperCase() === 'SEMUA')
     ? 'ALL' : rawStatus;
 
+  const masterScope = CURRENT_SCOPE_DEPT_ ? getKaryawanMasterMap_() : null;
   const result = [];
   const idColumn = data.map(r => [r[0]]);
   let idsFixed = false;
@@ -224,6 +225,7 @@ function getPengajuanList(status, token) {
 
     const rowStatus = String(r[8] || '').trim();
     if (filterStatus !== 'ALL' && rowStatus !== filterStatus) return;
+    if (masterScope && !nameInScope_(nama, masterScope)) return;   // akun per-departemen
 
     result.push({
       id: id, nama: r[1], nik: r[2], jenis: r[3],
@@ -276,6 +278,7 @@ function approvePengajuan(id, token) {
     if (rowNum === -1) throw new Error('Pengajuan tidak ditemukan.');
 
     const row = sheet.getRange(rowNum, 1, 1, PENGAJUAN_HEADER_.length).getValues()[0];
+    assertNamesInScope_([String(row[1] || '').trim()]);
     const nama = row[1], jenis = row[3], status = row[8];
     if (status !== 'Pending') throw new Error('Pengajuan ini sudah diproses sebelumnya (status: ' + status + ').');
 
@@ -309,6 +312,7 @@ function rejectPengajuan(id, catatan, token) {
     const sheet = getOrCreatePengajuanSheet_();
     const rowNum = findPengajuanRow_(sheet, id);
     if (rowNum === -1) throw new Error('Pengajuan tidak ditemukan.');
+    assertNamesInScope_([String(sheet.getRange(rowNum, 2).getValue() || '').trim()]);
 
     const status = sheet.getRange(rowNum, 9).getValue();
     if (status !== 'Pending') throw new Error('Pengajuan ini sudah diproses sebelumnya (status: ' + status + ').');
@@ -343,10 +347,12 @@ function getPengajuanPendingCount(token) {
   const namaValues = sheet.getRange(2, 2, lastRow - 1, 1).getValues();
   const statusValues = sheet.getRange(2, 9, lastRow - 1, 1).getValues();
 
+  const masterScope = CURRENT_SCOPE_DEPT_ ? getKaryawanMasterMap_() : null;
   let count = 0;
   for (let i = 0; i < statusValues.length; i++) {
     const nama = String(namaValues[i][0] || '').trim();
     const status = String(statusValues[i][0] || '').trim();
+    if (masterScope && !nameInScope_(nama, masterScope)) continue;   // akun per-departemen
     if (nama && status === 'Pending') count++;
   }
   return { count: count };

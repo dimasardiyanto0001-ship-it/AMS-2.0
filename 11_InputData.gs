@@ -106,6 +106,7 @@ function saveRealisasi(rowIndex, dayIndex, kode, token) {
   withScriptLock_(() => {
     const sheet = getSheet_(CONFIG.SHEET_REALISASI);
     validateCellTarget_(sheet, rowIndex, dayIndex);
+    assertRowsInScope_(sheet, [rowIndex]);
     sheet.getRange(rowIndex, CONFIG.FIRST_DAY_COL + dayIndex).setValue(realisasiCellValue_(kode));
     SpreadsheetApp.flush();
   });
@@ -125,6 +126,7 @@ function saveRealisasiBatch(updates, token) {
 
     // Tahap 1: validasi SEMUA sel dulu; satu salah -> tidak ada yang ditulis.
     const items = validateCellUpdates_(sheet, updates, assertValidStatusCode_);
+    assertRowsInScope_(sheet, items.map(it => it.row));
 
     // Tahap 2: tulis (per baris, hari berurutan digabung).
     writeGridCells_(sheet, items, realisasiCellValue_);

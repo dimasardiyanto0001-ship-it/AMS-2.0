@@ -143,6 +143,7 @@ function assignPolaKaryawan(nama, polaAssigned, offsetHari, token) {
   polaAssigned = String(polaAssigned || '').trim();
   offsetHari = parseInt(offsetHari, 10) || 0;
   if (!nama) throw new Error('Nama karyawan wajib diisi.');
+  assertNamesInScope_([nama]);
   if (Math.abs(offsetHari) > OFFSET_HARI_MAKS_) {
     throw new Error('Offset hari harus antara -' + OFFSET_HARI_MAKS_ + ' dan ' + OFFSET_HARI_MAKS_ + '.');
   }
@@ -278,9 +279,11 @@ function generateJadwalDariPola(mode, token) {
     const gridRange = jadwalSheet.getRange(CONFIG.DATA_START_ROW, CONFIG.FIRST_DAY_COL, numRows, dayCount);
     const grid = gridRange.getValues();
 
+    const masterScope = CURRENT_SCOPE_DEPT_ ? getKaryawanMasterMap_() : null;
     for (let i = 0; i < numRows; i++) {
       const nama = String(names[i][0] === null || names[i][0] === undefined ? '' : names[i][0]).trim();
       if (!nama) continue;
+      if (masterScope && !nameInScope_(nama, masterScope)) continue;   // akun per-departemen: lewati departemen lain
 
       const assign = assignMap[nameKey_(nama)];
       if (!assign || !assign.polaAssigned) { info.karyawanTanpaPola.push(nama); continue; }
