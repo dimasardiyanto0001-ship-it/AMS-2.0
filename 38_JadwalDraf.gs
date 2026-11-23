@@ -125,7 +125,7 @@ function getJadwalDrafDetail(bulanKey, token) {
   return {
     key: t.key, label: t.label, dayCount: t.dayCount, dayNames: dayNames,
     employees: employees, ringkasan: ringkasan, tidakAdaDiDraf: tidakAdaDiDraf,
-    diunggahOleh: String(meta[DRAF_COL_UPLOADER_ - 1] || ''),
+    diunggahOleh: rows.map(r => String(r[DRAF_COL_UPLOADER_ - 1] || '').trim()).filter((u, i, arr) => u && arr.indexOf(u) === i).join(', '),
     waktu: w instanceof Date ? Utilities.formatDate(w, 'Asia/Jakarta', 'dd/MM/yyyy HH:mm') : String(w || ''),
     shiftCodes: getShiftCodesDynamic_()
   };
