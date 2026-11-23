@@ -72,6 +72,7 @@ const ROUTES = {
   uploadJadwal: { fn: 'uploadJadwal', args: ['base64Data', 'filename', 'token'] },
   uploadJadwalDraf: { fn: 'uploadJadwalDraf', args: ['base64Data', 'filename', 'bulanKey', 'token'] },
   getJadwalDrafList: { fn: 'getJadwalDrafList', args: ['token'] },
+  getJadwalDrafDetail: { fn: 'getJadwalDrafDetail', args: ['bulanKey', 'token'] },
   hapusJadwalDraf: { fn: 'hapusJadwalDraf', args: ['bulanKey', 'token'] },
   uploadRealisasi: { fn: 'uploadRealisasi', args: ['base64Data', 'filename', 'token'] },
   uploadFingerAbsen: { fn: 'uploadFingerAbsen', args: ['base64Data', 'filename', 'token'] },
