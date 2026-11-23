@@ -2648,6 +2648,8 @@ function submitDeleteEmployee() {
 
   /* ============ DRAF JADWAL BULAN DEPAN ============ */
   var DRAF_LIST_ = [];
+  var DRAF_MONTHS_ = [];
+  var DRAF_TARGET_KEY_ = '';
 
   function canManageDraf_() {
     return !!SESSION && (SESSION.role === 'Super Admin' || String(SESSION.role || '').trim().toLowerCase() === 'admin');
@@ -2657,16 +2659,12 @@ function submitDeleteEmployee() {
     const panel = document.getElementById('drafPanel');
     if (!panel) return;
     if (!canManageDraf_()) { panel.classList.add('hidden'); return; }
-    panel.classList.remove('hidden');
     DRAF_LIST_ = (res.draf || []).map(d => Object.assign({}, d, { aktifBerikutnya: d.key === (res.bulanTujuan && res.bulanTujuan[0] ? res.bulanTujuan[0].key : '') }));
-    const sel = document.getElementById('drafBulanSelect');
-    const keep = sel.value;
-    sel.innerHTML = '';
-    (res.bulanTujuan || []).forEach(o => { const op = document.createElement('option'); op.value = o.key; op.textContent = o.label; sel.appendChild(op); });
-    if (keep) sel.value = keep;
+    DRAF_MONTHS_ = res.bulanTujuan || [];
+    panel.classList.toggle('hidden', DRAF_LIST_.length === 0);
     const list = document.getElementById('drafList');
     list.innerHTML = '';
-    if (!DRAF_LIST_.length) { list.textContent = 'Belum ada draf jadwal.'; return; }
+    if (!DRAF_LIST_.length) return;
     DRAF_LIST_.forEach(d => {
       const row = document.createElement('div');
       row.style.cssText = 'display:flex;gap:8px;align-items:center;margin:2px 0;';
@@ -2684,10 +2682,42 @@ function submitDeleteEmployee() {
     google.script.run.withSuccessHandler(renderDrafPanel_).withFailureHandler(() => {}).getJadwalDrafList(SESSION.token);
   }
 
-  function triggerDrafUpload() {
-    if (!canManageDraf_()) { toast('Hanya admin yang boleh upload jadwal bulan depan', true); return; }
-    if (!document.getElementById('drafBulanSelect').value) { toast('Pilih bulan tujuan dulu', true); return; }
-    document.getElementById('drafFileInput').click();
+  /** Satu tombol Upload Jadwal: pilih tujuan (periode aktif atau bulan depan sebagai draf). */
+  function openUploadJadwalChoice() {
+    if (!SESSION) { toast('Silakan login dulu untuk upload jadwal', true); showLoginGate(); return; }
+    if (!canManageDraf_() || !DRAF_MONTHS_.length) { triggerJadwalUpload(); return; } // tanpa pilihan bulan depan: perilaku lama
+    if (document.getElementById('uploadChoiceOverlay')) return;
+    const ov = document.createElement('div');
+    ov.id = 'uploadChoiceOverlay';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#fff;color:#0f172a;border-radius:12px;padding:20px;max-width:420px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,.3);';
+    const h = document.createElement('h3'); h.textContent = 'Upload jadwal untuk:'; h.style.marginBottom = '12px';
+    const mk = (value, text) => {
+      const l = document.createElement('label'); l.style.cssText = 'display:flex;gap:8px;align-items:center;margin:8px 0;cursor:pointer;';
+      const r = document.createElement('input'); r.type = 'radio'; r.name = 'uploadChoice'; r.value = value;
+      const s = document.createElement('span'); s.textContent = text;
+      l.appendChild(r); l.appendChild(s); return { l: l, r: r };
+    };
+    const optAktif = mk('aktif', 'Periode aktif' + ((STATE && STATE.period) ? ' (' + STATE.period + ') - langsung menimpa jadwal sekarang' : ''));
+    optAktif.r.checked = true;
+    const optDraf = mk('draf', 'Bulan depan (draf) - terisi otomatis saat Mulai Periode Baru');
+    const sel = document.createElement('select');
+    sel.style.cssText = 'margin:0 0 8px 26px;padding:4px;';
+    DRAF_MONTHS_.forEach(o => { const op = document.createElement('option'); op.value = o.key; op.textContent = o.label; sel.appendChild(op); });
+    const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;margin-top:14px;';
+    const cancel = document.createElement('button'); cancel.className = 'btn'; cancel.textContent = 'Batal';
+    const go = document.createElement('button'); go.className = 'btn btn-upload'; go.textContent = 'Pilih File';
+    const close = () => ov.remove();
+    cancel.onclick = close;
+    ov.onclick = e => { if (e.target === ov) close(); };
+    go.onclick = () => {
+      if (optDraf.r.checked) { DRAF_TARGET_KEY_ = sel.value; close(); document.getElementById('drafFileInput').click(); }
+      else { close(); triggerJadwalUpload(); }
+    };
+    row.appendChild(cancel); row.appendChild(go);
+    box.appendChild(h); box.appendChild(optAktif.l); box.appendChild(optDraf.l); box.appendChild(sel); box.appendChild(row);
+    ov.appendChild(box); document.body.appendChild(ov);
   }
 
   function handleDrafFileSelected(evt) {
@@ -2696,24 +2726,25 @@ function submitDeleteEmployee() {
     evt.target.value = '';
     if (!SESSION) { toast('Sesi login habis, silakan login ulang', true); showLoginGate(); return; }
     if (!/\.xlsx$/i.test(file.name)) { toast('File harus berformat .xlsx', true); return; }
-    const bulanKey = document.getElementById('drafBulanSelect').value;
-    const btn = document.getElementById('drafUploadBtn');
+    const bulanKey = DRAF_TARGET_KEY_;
+    if (!bulanKey) { toast('Pilih bulan tujuan dulu', true); return; }
+    const btn = document.getElementById('uploadJadwalBtn');
     btn.disabled = true; btn.textContent = '⏳ Memproses...';
     const reader = new FileReader();
     reader.onload = () => {
       google.script.run
         .withSuccessHandler(res => {
-          btn.disabled = false; btn.textContent = 'Upload Draf';
+          btn.disabled = false; btn.textContent = 'Upload Jadwal';
           renderDrafPanel_(res);
           let msg = 'Draf ' + res.bulan + ' tersimpan: ' + res.matched + ' karyawan cocok.';
           if (res.notFound && res.notFound.length) msg += ' Tidak ditemukan: ' + res.notFound.join(', ') + '.';
           if (res.invalidCodes && res.invalidCodes.length) msg += ' Kode tidak valid dikosongkan: ' + res.invalidCodes.length + ' sel.';
           toast(msg, !!((res.notFound && res.notFound.length) || (res.invalidCodes && res.invalidCodes.length)));
         })
-        .withFailureHandler(err => { btn.disabled = false; btn.textContent = 'Upload Draf'; toast('Gagal upload draf: ' + err.message, true); })
+        .withFailureHandler(err => { btn.disabled = false; btn.textContent = 'Upload Jadwal'; toast('Gagal upload draf: ' + err.message, true); })
         .uploadJadwalDraf(reader.result.split(',')[1], file.name, bulanKey, SESSION.token);
     };
-    reader.onerror = () => { btn.disabled = false; btn.textContent = 'Upload Draf'; toast('Gagal membaca file dari komputer Anda.', true); };
+    reader.onerror = () => { btn.disabled = false; btn.textContent = 'Upload Jadwal'; toast('Gagal membaca file dari komputer Anda.', true); };
     reader.readAsDataURL(file);
   }
 
