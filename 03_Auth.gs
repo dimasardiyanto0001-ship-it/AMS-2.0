@@ -81,6 +81,9 @@ function ensureUsersSheetColumns_(sheet) {
   if (sheet.getRange(1, USERS_COL.DEPARTMENT).getValue() !== 'Departemen') {
     sheet.getRange(1, USERS_COL.DEPARTMENT).setValue('Departemen').setFontWeight('bold');
   }
+  if (sheet.getRange(1, USERS_COL.EMAIL).getValue() !== 'Email') {
+    sheet.getRange(1, USERS_COL.EMAIL).setValue('Email').setFontWeight('bold');
+  }
   if (sheet.getRange(1, USERS_COL.STATUS).getValue() !== 'Status') {
     sheet.getRange(1, USERS_COL.STATUS).setValue('Status').setFontWeight('bold');
     const lastRow = sheet.getLastRow();

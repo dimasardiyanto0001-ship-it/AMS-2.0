@@ -235,6 +235,8 @@ function uploadJadwalDraf(base64Data, filename, bulanKey, token) {
   catatAuditLog_(session, 'Upload Draf Jadwal', SHEET_JADWAL_DRAF_, target.label,
     filename + ': ' + info.rows.length + ' karyawan cocok (' + baru + ' baru, ' + diperbarui + ' diperbarui), ' + info.notFound.length + ' nama tidak ditemukan, ' + info.invalidCodes.length + ' kode tidak valid');
 
+  notifUploadDrafKeHod_(session, target, info.rows.length, filename);   // email ke HOD; tidak pernah menggagalkan upload
+
   return {
     bulan: target.label,
     matched: info.rows.length,

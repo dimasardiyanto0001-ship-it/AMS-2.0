@@ -28,6 +28,7 @@
   getUsersList: ['token'],
   addUserWeb: ['nama', 'username', 'password', 'role', 'token', 'department'],
   setUserDepartment: ['username', 'department', 'token'],
+  setUserEmail: ['username', 'email', 'token'],
   getDepartmentOptions: ['token'],
   setUserStatus: ['username', 'status', 'token'],
   resetUserPasswordByAdmin: ['username', 'newPassword', 'token'],
@@ -3874,9 +3875,22 @@ function sendAIChatMessage() {
       .setUserDepartment(username, dept, SESSION.token);
   }
 
+  function emailCellHtml_(u, canEdit) {
+    if (!canEdit) return escapeHtml(u.email || '-');
+    return `<input type="email" value="${escapeHtml(u.email || '')}" placeholder="nama@perusahaan.com" style="min-width:180px;" onchange='changeUserEmail(${JSON.stringify(u.username)}, this.value)'>`;
+  }
+
+  function changeUserEmail(username, email) {
+    if (!SESSION) return;
+    google.script.run
+      .withSuccessHandler(list => { USERS_LIST_DATA = list || []; renderUsersTable(); toast('Email akun "' + username + '" ' + (email ? 'disimpan' : 'dikosongkan')); })
+      .withFailureHandler(err => { toast('Gagal menyimpan email: ' + err.message, true); loadUsersList(); })
+      .setUserEmail(username, email, SESSION.token);
+  }
+
   function renderUsersTable() {
     const canEdit = !!SESSION && SESSION.role === 'Super Admin';
-    const cols = ['Username', 'Nama', 'Role', 'Departemen', 'Status'];
+    const cols = ['Username', 'Nama', 'Role', 'Departemen', 'Email', 'Status'];
     let html = '<table><thead><tr>' + cols.map(c => `<th>${c}</th>`).join('') + (canEdit ? '<th>Aksi</th>' : '') + '</tr></thead><tbody>';
     USERS_LIST_DATA.forEach(u => {
       const isNonaktif = u.status === 'Nonaktif';
@@ -3885,6 +3899,7 @@ function sendAIChatMessage() {
         <td class="name-col">${escapeHtml(u.nama)}</td>
         <td>${escapeHtml(u.role)}</td>
         <td>${deptCellHtml_(u, canEdit)}</td>
+        <td>${emailCellHtml_(u, canEdit)}</td>
         <td>${isNonaktif ? '<span style="color:#dc2626;font-weight:600;">Nonaktif</span>' : '<span style="color:#16a34a;font-weight:600;">Aktif</span>'}</td>
         ${canEdit ? `<td style="white-space:nowrap;">
           <button class="btn btn-ghost" onclick='openResetUserPasswordPicker(${JSON.stringify(u.username)})'>🔑 Reset Password</button>

@@ -233,9 +233,10 @@ function getUsersList(token) {
   requireMenuAccess_(token, 'settingaccount');
   const last = sheet.getLastRow();
   if (last < 2) return [];
-  return sheet.getRange(2, 1, last - 1, USERS_COL.DEPARTMENT).getValues().map(r => ({
+  return sheet.getRange(2, 1, last - 1, USERS_COL.EMAIL).getValues().map(r => ({
     username: r[0], nama: r[2], role: resolveRoleName_(r[3]), status: r[5] || 'Aktif',
-    department: String(r[USERS_COL.DEPARTMENT - 1] || '')
+    department: String(r[USERS_COL.DEPARTMENT - 1] || ''),
+    email: String(r[USERS_COL.EMAIL - 1] || '')
   }));
 }
 
